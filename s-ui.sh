@@ -71,7 +71,7 @@ confirm() {
 confirm_restart() {
     confirm "Restart the ${1} service" "y"
     if [[ $? == 0 ]]; then
-        restart
+        restart "$1"
     else
         show_menu
     fi
@@ -83,13 +83,11 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/JamesAlaHZS/s-ui-gpc-optimize/main/install.sh)
-    if [[ $? == 0 ]]; then
-        if [[ $# == 0 ]]; then
-            start
-        else
-            start 0
-        fi
+    bash <(curl -Ls https://raw.githubusercontent.com/JamesAlaHZS/s-ui-gpc-optimize/main/install.sh) || return $?
+    if [[ $# == 0 ]]; then
+        start s-ui
+    else
+        start s-ui 0
     fi
 }
 
@@ -254,7 +252,7 @@ stop() {
     else
         svc_stop $1
         sleep 2
-        check_status
+        check_status "$1"
         if [[ $? == 1 ]]; then
             LOGI "${1} stopped successfully"
         else
@@ -668,6 +666,29 @@ ssl_cert_issue() {
     fi
 }
 
+cloudflare_token_error_hint() {
+    [[ -n "${CF_Token:-}" ]] || return 0
+    # Only diagnose a failed issuance. Keep the token out of process arguments
+    # and never print Cloudflare's response, which may contain account details.
+    if [[ "$CF_Token" == *[$'\r\n']* ]]; then
+        LOGE "API Token 含换行符，请重新粘贴令牌值。"
+        return 0
+    fi
+    local escaped_token response
+    escaped_token=${CF_Token//\\/\\\\}
+    escaped_token=${escaped_token//\"/\\\"}
+    response=$(printf 'header = "Authorization: Bearer %s"\n' "$escaped_token" |
+        curl -sS --connect-timeout 5 --max-time 10 --config - \
+            'https://api.cloudflare.com/client/v4/zones?per_page=1' 2>/dev/null) || return 0
+    if grep -Eq '"code"[[:space:]]*:[[:space:]]*6111([,}[:space:]])' <<<"$response"; then
+        LOGE "Cloudflare 拒绝认证格式（6111）。请在 VPS 重新输入 API Token 的完整令牌值，不含 Bearer 前缀或引号；Account ID 可留空。"
+    elif grep -Eq '"code"[[:space:]]*:[[:space:]]*(9109|10000)([,}[:space:]])' <<<"$response"; then
+        LOGE "Cloudflare 认证失败。请检查 API Token 是否有效，以及目标域名的区域读取和 DNS 编辑权限。"
+    else
+        LOGE "请查看 acme.sh 日志；API Token 需对目标域名具备 Zone:Zone:Read 和 Zone:DNS:Edit 权限。"
+    fi
+}
+
 ssl_cert_issue_CF() {
     echo -E ""
     LOGD "******Instructions for use******"
@@ -691,7 +712,7 @@ ssl_cert_issue_CF() {
             LOGD "******Instructions for use******"
             LOGI "This Acme script requires the following data:"
             LOGI "1.Cloudflare credentials, either of:"
-            LOGI "   a) An API Token scoped to Zone:DNS:Edit (recommended)"
+            LOGI "   a) An API Token scoped to Zone:Zone:Read and Zone:DNS:Edit (recommended)"
             LOGI "   b) The account e-mail and the Global API Key (full account access)"
             LOGI "2.The domain name that has been resolved DNS to the current server by Cloudflare"
             LOGI "3.The script applies for a certificate. The default installation path is /root/cert "
@@ -723,7 +744,7 @@ ssl_cert_issue_CF() {
                 CF_GlobalKey=""
                 CF_AccountEmail=""
                 LOGD "Choose the Cloudflare authentication method:"
-                echo -e "${green}\t1.${plain} API Token, scoped to Zone:DNS:Edit (*recommended*)"
+                echo -e "${green}\t1.${plain} API Token, scoped to Zone:Zone:Read and Zone:DNS:Edit (*recommended*)"
                 echo -e "${green}\t2.${plain} Global API Key + account e-mail (full account access)"
                 read -p "Enter your choice [1-2, default 1]: " cf_auth
                 cf_auth=${cf_auth:-1}
@@ -782,6 +803,7 @@ ssl_cert_issue_CF() {
                 ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${CF_Domain}" $force_flag --log
                 if [ $? -ne 0 ]; then
                     LOGE "Certificate issuance failed, script exiting..."
+                    cloudflare_token_error_hint
                     exit 1
                 else
                     LOGI "Certificate issued Successfully, Installing..."

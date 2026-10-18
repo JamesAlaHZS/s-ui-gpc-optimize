@@ -514,6 +514,17 @@ verify_checksum() {
     echo -e "${green}$(t checksum_ok)${plain}"
 }
 
+install_management_script() {
+    # The caller may be /usr/bin/s-ui itself. Replace the inode so Bash can
+    # finish reading that running script without seeing new or truncated text.
+    local script_tmp
+    script_tmp=$(mktemp /usr/bin/.s-ui.XXXXXXXX) || return 1
+    if ! install -m 0755 "$1" "$script_tmp" || ! mv -f "$script_tmp" /usr/bin/s-ui; then
+        rm -f "$script_tmp"
+        return 1
+    fi
+}
+
 install_s-ui() {
     # A private directory, not /tmp itself. The old path was predictable, so on
     # a shared host another user could pre-create the archive or the extracted
@@ -568,7 +579,6 @@ install_s-ui() {
     rm -f "$archive"
 
     chmod +x s-ui/sui s-ui/s-ui.sh
-    cp s-ui/s-ui.sh /usr/bin/s-ui
     if ! cp -rf s-ui /usr/local/; then
         echo -e "${red}$(t extract_fail)${plain}"
         df -h /usr/local 2>/dev/null
@@ -584,6 +594,7 @@ install_s-ui() {
     if [[ "${init_system}" == "systemd" ]]; then
         cp -f s-ui/*.service /etc/systemd/system/
     fi
+    install_management_script s-ui/s-ui.sh || exit 1
     rm -rf s-ui
 
     config_after_install
