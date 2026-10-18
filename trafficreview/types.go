@@ -48,6 +48,7 @@ type Summary struct {
 	Disclaimer                  string                    `json:"disclaimer"`
 	BillingOverview             *BillingOverview          `json:"billingOverview,omitempty"`
 	CarrierCorrelation          *CarrierCorrelationReport `json:"carrierCorrelation,omitempty"`
+	ProxyAnalysis               *ProxyAnalysis            `json:"proxyAnalysis,omitempty"`
 }
 
 type SeriesPoint struct {

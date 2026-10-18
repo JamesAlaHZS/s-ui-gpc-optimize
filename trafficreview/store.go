@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS review_billing_sync_runs (id INTEGER PRIMARY KEY AUTO
 CREATE INDEX IF NOT EXISTS review_billing_sync_month ON review_billing_sync_runs(month,at);
 `, applicationID)
 	schema += historySchema
+	schema += proxyAnalysisSchema
 	if _, err = db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
@@ -104,6 +105,10 @@ CREATE INDEX IF NOT EXISTS review_billing_sync_month ON review_billing_sync_runs
 		_, _ = db.Exec(alter)
 	}
 	if err = s.migrateHistory(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = s.migrateProxyHistory(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -167,6 +172,10 @@ func (s *Store) Retain(now int64) error {
 		{"DELETE FROM nic_hours WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
 		{"DELETE FROM traffic_hours WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
 		{"DELETE FROM review_history_gaps WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
+		{"DELETE FROM proxy_business_hours WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
+		{"DELETE FROM proxy_business_minutes WHERE at<?", now - 7*86400},
+		{"DELETE FROM proxy_coverage_hours WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
+		{"DELETE FROM proxy_history_gaps WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
 		{"DELETE FROM review_checkpoints WHERE seen<?", now - 7200},
 		{"DELETE FROM review_alerts WHERE at<?", now - 90*86400},
 		{"DELETE FROM review_billing_sync_runs WHERE at<?", now - 90*86400},
@@ -212,6 +221,11 @@ func addDestination(tx *sql.Tx, at int64, d Destination, version string) error {
 	}
 	if err := addTrafficHour(tx, at, d); err != nil {
 		return err
+	}
+	if d.Layer == "proxy" {
+		if err := addProxyBusiness(tx, at, d); err != nil {
+			return err
+		}
 	}
 	_, err := tx.Exec(`INSERT INTO traffic_minutes(at,layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version,up,down,tx,rx,sample_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(at,layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version) DO UPDATE SET up=up+excluded.up,down=down+excluded.down,tx=tx+excluded.tx,rx=rx+excluded.rx,sample_count=sample_count+excluded.sample_count`,
@@ -324,6 +338,11 @@ func (s *Store) Summary(r Range) (Summary, error) {
 		corr.Partial = v.Partial || v.DestinationDetailsPartial
 		v.CarrierCorrelation = &corr
 	}
+	analysis, err := s.ProxyAnalysis(r, now)
+	if err != nil {
+		return v, err
+	}
+	v.ProxyAnalysis = &analysis
 	return v, nil
 }
 
@@ -402,7 +421,7 @@ func (s *Store) Destinations(r Range) ([]Destination, error) {
 	}
 	query += " GROUP BY layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version ORDER BY "
 	if r.Sort == "egress" {
-		query += "SUM(CASE WHEN layer='proxy' THEN up ELSE tx END) DESC"
+		query += "SUM(CASE WHEN layer='proxy' THEN up+down ELSE tx END) DESC"
 	} else {
 		query += "SUM(up)+SUM(down)+SUM(tx)+SUM(rx) DESC"
 	}

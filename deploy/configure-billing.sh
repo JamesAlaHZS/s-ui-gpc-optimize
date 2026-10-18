@@ -57,6 +57,6 @@ mv -f "$env_file" /etc/s-ui/traffic-review-billing.env
 env_file=''
 systemctl daemon-reload
 systemctl enable --now traffic-review-bill-sync.timer
-echo '完成：已导入首批数据，并开启每 12 小时同步。导出可能延迟；空账单不代表零费用。'
+echo '完成：已导入首批数据，并开启每天一次同步。导出没有固定到达时间；空账单不代表零费用。'
 echo '面板 → 出站流量 → GCP 账单：选洛杉矶时间和已导出的日期。'
 echo '查看定时器：systemctl list-timers traffic-review-bill-sync.timer --all'

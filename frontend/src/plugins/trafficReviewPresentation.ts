@@ -5,6 +5,15 @@ export function outboundPeers(rows: TrafficDestination[] | null): TrafficDestina
     .sort((a, b) => (b.txBytes ?? 0) - (a.txBytes ?? 0))
 }
 
+export function proxyPeerTotal(row: TrafficDestination): number | null {
+  return row.upBytes == null || row.downBytes == null ? null : row.upBytes + row.downBytes
+}
+
+export function proxyPeers(rows: TrafficDestination[] | null): TrafficDestination[] {
+  return (rows ?? []).filter(row => row.layer === 'proxy')
+    .sort((a, b) => (proxyPeerTotal(b) ?? -1) - (proxyPeerTotal(a) ?? -1))
+}
+
 export function billingStatusKey(overview: TrafficBillingOverview | null): string {
   const status = overview?.syncStatus
   if (!status) return 'syncNever'

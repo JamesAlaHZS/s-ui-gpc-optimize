@@ -2,6 +2,8 @@ package service
 
 import (
 	"bytes"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -63,6 +65,22 @@ func TestTrafficReviewServicePersistsRealProxyPayload(t *testing.T) {
 	// Stop performs the final drain synchronously; no ten-second sleep or
 	// competing DrainReview call is needed to observe the service's own path.
 	StopTrafficReview()
+	// A successful drain records coverage even before the first timer tick.
+	// The first heartbeat is only a baseline; it does not invent a full day.
+	probe, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checkpoint string
+	err = probe.QueryRow("SELECT value FROM review_meta WHERE key='proxy_coverage_checkpoint'").Scan(&checkpoint)
+	_ = probe.Close()
+	var coverage struct {
+		At    int64  `json:"at"`
+		Epoch string `json:"epoch"`
+	}
+	if err != nil || json.Unmarshal([]byte(checkpoint), &coverage) != nil || coverage.At == 0 || coverage.Epoch == "" {
+		t.Fatalf("successful service drain did not persist coverage baseline: %q, %v", checkpoint, err)
+	}
 	store, err := trafficreview.Open(dbPath, trafficreview.DefaultRules())
 	if err != nil {
 		t.Fatal(err)

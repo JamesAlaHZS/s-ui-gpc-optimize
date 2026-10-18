@@ -51,6 +51,12 @@ grep -q '^GCP_TARGET_PROJECT=example-vps$' /etc/s-ui/traffic-review-billing.env
 [[ $(stat -c %a /etc/s-ui/traffic-review-billing.env) == 640 ]]
 [[ $(stat -c %G /etc/s-ui/traffic-review-billing.env) == $(id -gn nobody) ]]
 grep -q 'enable --now traffic-review-bill-sync.timer' /systemctl.log
+grep -q '每天一次同步' /result
+tr -d '\r' </src/deploy/traffic-review-bill-sync.timer >/timer-config
+grep -qx 'OnCalendar=\*-\*-\* 00:15:00' /timer-config
+[[ $(grep -c '^OnCalendar=' /timer-config) == 1 ]]
+grep -qx 'RandomizedDelaySec=15m' /timer-config
+grep -qx 'Persistent=true' /timer-config
 grep -q -- '--adc --dry-run' /sync.log
 before=$(wc -l </sync.log)
 if printf 'unsafe;touch /injected\n\nbilling_export\ngcp_billing_export_v1_ABCDEF_123456\n\n' | bash /src/deploy/configure-billing.sh >/result 2>&1; then echo 'Accepted unsafe project'; exit 1; fi

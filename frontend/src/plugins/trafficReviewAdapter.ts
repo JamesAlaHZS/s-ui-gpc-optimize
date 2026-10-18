@@ -2,7 +2,7 @@ import type {
   FeeStatus, TrafficAlert, TrafficBillingOverview, TrafficBillingRecord,
   TrafficCarrierCandidate, TrafficCarrierCorrelation, TrafficConfidence,
   TrafficDestination, TrafficHealth, TrafficReviewEndpoint, TrafficSKUBillingBucket,
-  TrafficSeriesPoint, TrafficSummary,
+  TrafficSeriesPoint, TrafficSummary, TrafficProxyAnalysis,
 } from '@/types/trafficReview'
 
 type RecordValue = Record<string, unknown>
@@ -16,6 +16,34 @@ const decimal = (value: unknown): string | null =>
 const boolean = (value: unknown): boolean => value === true
 const stringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+
+function adaptProxyAnalysis(value: unknown): TrafficProxyAnalysis | null {
+  const item = record(value)
+  if (!item) return null
+  const comparison = record(item.billingComparison) ?? {}
+  return {
+    remoteUploadBytes: number(item.remoteUploadBytes), remoteDownloadBytes: number(item.remoteDownloadBytes),
+    forwardedEgressBytes: number(item.forwardedEgressBytes), forwardedIngressBytes: number(item.forwardedIngressBytes),
+    candidateUploadBytes: number(item.candidateUploadBytes), candidateDownloadBytes: number(item.candidateDownloadBytes),
+    candidateForwardedEgressBytes: number(item.candidateForwardedEgressBytes), candidateForwardedIngressBytes: number(item.candidateForwardedIngressBytes),
+    otherForwardedEgressBytes: number(item.otherForwardedEgressBytes), unknownDomainBytes: number(item.unknownDomainBytes),
+    observations: number(item.observations), firstSampleAt: number(item.firstSampleAt), lastSampleAt: number(item.lastSampleAt),
+    hasObservations: typeof item.hasObservations === 'boolean' ? item.hasObservations : null,
+    partial: boolean(item.partial), measurementBasis: text(item.measurementBasis), flowBillingConfirmed: false,
+    billingComparison: {
+      analysisFrom: number(comparison.analysisFrom), analysisTo: number(comparison.analysisTo),
+      status: text(comparison.status), reason: text(comparison.reason), pairCount: number(comparison.pairCount), eligibleDays: number(comparison.eligibleDays),
+      minMatchedDays: number(comparison.minMatchedDays), excludedRecentDays: number(comparison.excludedRecentDays),
+      timezone: text(comparison.timezone), scope: text(comparison.scope), flowBillingConfirmed: false,
+      scopes: (list(comparison.scopes) ?? []).map(scope => ({
+        projectID: text(scope.projectID), currency: text(scope.currency), skuIDs: stringArray(scope.skuIDs),
+        status: text(scope.status), reason: text(scope.reason), pairCount: number(scope.pairCount), eligibleDays: number(scope.eligibleDays),
+        candidateCorrelation: number(scope.candidateCorrelation), baselineCorrelation: number(scope.baselineCorrelation), confoundingCorrelation: number(scope.confoundingCorrelation),
+        carrierUsageGiB: decimal(scope.carrierUsageGiB), carrierNetCost: decimal(scope.carrierNetCost), billingDayCount: number(scope.billingDayCount),
+      })),
+    },
+  }
+}
 
 function list(value: unknown): RecordValue[] | null {
   if (!Array.isArray(value)) return null
@@ -82,7 +110,7 @@ function adaptBillingOverview(value: unknown): TrafficBillingOverview | null {
     syncStatus: {
       enabled: boolean(sync.enabled),
       mode: text(sync.mode),
-      intervalHours: number(sync.intervalHours) ?? 12,
+      intervalHours: number(sync.intervalHours) ?? 24,
       lastSyncAt: number(sync.lastSyncAt),
       lastExportTime: number(sync.lastExportTime),
       lastStatus: text(sync.lastStatus),
@@ -153,6 +181,7 @@ export function adaptTrafficReviewData(endpoint: TrafficReviewEndpoint, value: u
     const item = record(value)
     if (!item) return null
     const result: TrafficSummary = {
+      proxyAnalysis: adaptProxyAnalysis(item.proxyAnalysis),
       from: number(item.from) ?? 0,
       to: number(item.to) ?? 0,
       timezone: text(item.timezone),

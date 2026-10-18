@@ -6,6 +6,10 @@
 
 实现分三层，各层数值**不可直接相加**。内核逐连接归因范围为 TCP/UDP；其他协议、未经过 conntrack 的流量及协议开销仍只进入网卡总量。UDP 关联可能复用多个目的地，因此代理 UDP 的初始域名只作上下文，业务置信度保留为未知：
 
+主界面现聚焦代理载荷及 ChatGPT 候选：出站为远端上传加发回客户端的下载；入站合计按同一批转发载荷镜像推导，不是两次独立测量，不与出站相加。网卡和 conntrack 保留在诊断。候选使用四组 OpenAI 相关域名后缀，不按共享 IP 或账单同日出现直接确认收费。
+
+`summary.proxyAnalysis` 自动按完整洛杉矶账单日比对：至少 7 个有覆盖心跳、业务历史完整且已有该 SKU 账单的可比日；排除当前及前两天的等待区间。短查询单独扩展到此前 35 日，并返回明确的 `analysisFrom/analysisTo`，普通代理总量保持原查询范围。Pearson 候选相关系数至少 0.8 才报告相关线索；未知载荷超过 10%、候选与其他载荷高度共变、总流量解释更强或多个项目无法绑定时保持无法区分。金额按项目/币种保留十进制，负用量更正日不作为物理流量样本；缺少 SKU 行不是零值。新账单或更正导入后自动重算，不自动改路由或将 `flowBillingConfirmed` 设为 true。
+
 1. 面板 SessionTracker 读取活跃 TCP/UDP 会话的累计代理载荷字节，并在短连接关闭时保留最终计数。它按已提供或嗅探的域名标注业务，既不是网卡线速字节，也不能涵盖 VPS 上所有非代理进程。十秒批量写入独立 SQLite，不调用会清零的原 `GetStats`。
 2. 独立采集器读取指定公网接口的 RX/TX 内核累计计数，构成接口总量；另用单条固定 `conntrack -E -e NEW,DESTROY -o timestamp,extended,id` 事件流监听 IPv4/IPv6（事件模式不传 `-f`），并分别读取两族活跃快照。原始与回复元组、NAT 及本机地址用于区分 **主动连接远端** 与 **响应入站对端**；后者也包括 SSH、面板和扫描响应，不等于代理下载。环回及不匹配监控地址的其他接口连接正常排除；NEW 暂无字节计数不当作故障，目标连接后续快照或结束记录仍缺计数才提示缺口。无法确定方向时不猜测出站字节或收费类别。内核未启用 `nf_conntrack_acct`、缺少 CLI/权限、UDP 关联丢失或事件缓冲溢出时，逐目的字节可能缺失；采集仍应保留接口总量和健康状态。
 3. 本地 CSV 仅记录项目/洛杉矶账单日/SKU 的用量和精确十进制费用文本。即使与本地字节同日出现，也不自动将某条流确认或分摊到某个 SKU。
@@ -64,7 +68,7 @@ date,project_id,sku_id,description,usage_gib,cost,currency
 | `Network Inter Region Data Transfer Out from Americas to Virginia` | `C863-37DA-506E` | 跨 Region 流量单独备查，计入五项总流量估算，**不计入** Standard Tier 200 GiB 免费额度 |
 | `Network Data Transfer Out via Carrier Peering Network - Americas Based` | `984A-1F27-2D1F` | 单独记录实际收费 Carrier Peering 用量及金额，计入五项总流量估算，**不可被** Standard Tier 200 GiB 免费额度抵扣 |
 
-自动同步采用 [Standard usage cost export](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage)（表名 `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>`），不启用 FOCUS、Detailed usage cost 或 Pricing export；由 VPS 本地 systemd timer（[`deploy/traffic-review-bill-sync.timer`](../deploy/traffic-review-bill-sync.timer) / [`deploy/traffic-review-bill-sync.service`](../deploy/traffic-review-bill-sync.service)）每 12 小时执行一次，保留上述 CSV 手工导入作为备用：
+自动同步采用 [Standard usage cost export](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage)（表名 `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>`），不启用 FOCUS、Detailed usage cost 或 Pricing export；由 VPS 本地 systemd timer（[`deploy/traffic-review-bill-sync.timer`](../deploy/traffic-review-bill-sync.timer) / [`deploy/traffic-review-bill-sync.service`](../deploy/traffic-review-bill-sync.service)）每天执行一次，保留上述 CSV 手工导入作为备用：
 
 ```sh
 # 离线模拟快照验证（不连接 GCP）
@@ -82,7 +86,7 @@ date,project_id,sku_id,description,usage_gib,cost,currency
 
 预算与安全边界：
 - **本工具查询预算**：单次 `maximumBytesBilled` 默认 `64 MiB`，本地月度累计上限 `3.875 GiB`，按 [BigQuery 公开按需价 $6.25/TiB](https://cloud.google.com/bigquery/pricing) 估算查询约 `$0.0237/月`。执行前在 SQLite 中串行预留完整单次上限；成功后记录实际 billed bytes，超时/失败/中断保留保守预留，跨进程并发不会重复占用同一份预算。源账单**表**的存储量检查上限为 `10 GiB`，并非整个数据集；它只暂停本工具读取，不会阻止云端表继续增长。账户其他查询量不会自动发现，可通过 `--existing-monthly-bytes` 提供额外保守预留。此保护不保证账户全部查询、存储或其他服务总账单小于 `$0.05/月`，也不自动提高预算。
-- **幂等更新、延迟与更正**：Google 账单导出常有 `>24 小时` 延迟，首次启用回填最多可能需要 5 天。同步按 `(date, project_id, sku_id, currency)` 幂等重算回溯窗口：完全相同的 12 小时轮询不会重复累加金额；迟到账单或历史冲正（`export_time` 更新且数值变化）会原地替换为最新日汇总并记录 `bill_correction` 审计告警；缺失或待更新窗口保持 `dataPending=true`，不把缺数据当成 `$0`。
+- **幂等更新、延迟与更正**：Google 账单导出常有 `>24 小时` 延迟，首次启用回填最多可能需要 5 天。同步按 `(date, project_id, sku_id, currency)` 幂等重算回溯窗口：完全相同的 每日轮询不会重复累加金额；迟到账单或历史冲正（`export_time` 更新且数值变化）会原地替换为最新日汇总并记录 `bill_correction` 审计告警；缺失或待更新窗口保持 `dataPending=true`，不把缺数据当成 `$0`。
 - **认证边界**：仅使用 VM 服务账号 ADC（授予查询项目 `roles/bigquery.jobUser` 与账单数据集 `roles/bigquery.dataViewer`），拒绝长期 JSON 私钥文件。
 - **Carrier Peering 站点候选与中转槽位（默认保留待配置）**：由于 Google 账单不包含逐域名/逐连接映射，候选分析仅提供基于时间窗、字节量、代理用户与出站路由的相关性证据（`flowBillingConfirmed` 始终为 `false`）。当前中转节点尚未制定，`RelaySuggestion` 默认保持 `status="pending_configuration"`（`configured=false`、规则出站占位符 `<PENDING_RELAY_OUTBOUND>`），仅针对 `proxy` 或 `to_remote` 远端目标生成候选列表（自动排除 `to_client` 客户端回程 IP）；待后续确定中转节点后，可通过 `--relay-outbound <TAG>` 生成预览规则，并用 `CompareRelayPeriods` 对比中转前后的真实 Carrier Peering 账单变化。
 

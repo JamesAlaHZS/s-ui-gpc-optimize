@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { billingStatusKey, connectionErrorKey, outboundPeers, relayRule } from './trafficReviewPresentation'
+import { billingStatusKey, connectionErrorKey, outboundPeers, proxyPeers, proxyPeerTotal, relayRule } from './trafficReviewPresentation'
 import { adaptTrafficReviewData } from './trafficReviewAdapter'
 import type { TrafficBillingOverview, TrafficDestination, TrafficSummary } from '@/types/trafficReview'
 import { trafficReviewEn, trafficReviewZh, trafficReviewZhHant } from '@/locales/trafficReview'
 
 describe('outbound presentation', () => {
+  it('ranks proxy sessions by upload plus download and retains unknown domains', () => {
+    const rows = [
+      { layer: 'proxy', domain: 'chatgpt.com', upBytes: 100, downBytes: 1 },
+      { layer: 'network', domain: '', upBytes: 9999, downBytes: 9999 },
+      { layer: 'proxy', domain: '', upBytes: 1, downBytes: 200 },
+    ] as TrafficDestination[]
+    expect(proxyPeers(rows).map(row => row.domain)).toEqual(['', 'chatgpt.com'])
+    expect(proxyPeerTotal(rows[2]!)).toBe(201)
+    expect(proxyPeerTotal({ upBytes: null, downBytes: 2 } as TrafficDestination)).toBeNull()
+  })
   it('ranks network TX without adding proxy payload or RX', () => {
     const rows = [
       { layer: 'network', peer: 'incoming', txBytes: 2, rxBytes: 999999 },

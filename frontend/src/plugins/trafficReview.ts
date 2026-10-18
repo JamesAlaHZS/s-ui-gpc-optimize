@@ -36,8 +36,8 @@ export function createTrafficReviewPoller(
       await Promise.all(trafficReviewEndpoints.map(async (endpoint) => {
         try {
           const windowQuery = { date: requestedQuery.date, startDate: requestedQuery.startDate, endDate: requestedQuery.endDate, timezone: requestedQuery.timezone }
-          const destinationQuery: TrafficReviewQuery = { ...requestedQuery, layer: 'network', sort: 'egress', limit: 500 }
-          if (!destinationQuery.leg) delete destinationQuery.leg
+          const destinationQuery: TrafficReviewQuery = { ...requestedQuery, layer: 'proxy', sort: 'egress', limit: 500 }
+          delete destinationQuery.leg
           const result = await request(endpoint, endpoint === 'destinations'
             ? destinationQuery
             : windowQuery)
