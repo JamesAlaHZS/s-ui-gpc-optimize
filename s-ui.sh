@@ -152,14 +152,10 @@ uninstall() {
     fi
     rm /etc/s-ui/ -rf
     rm /usr/local/s-ui/ -rf
+    rm -f /usr/bin/s-ui
 
-    echo ""
-    echo -e "Uninstalled Successfully, If you want to remove this script, then after exiting the script run ${green}rm /usr/local/s-ui -f${plain} to delete it."
-    echo ""
-
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    echo "卸载完成。"
+    exit 0
 }
 
 reset_admin() {

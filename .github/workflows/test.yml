@@ -41,6 +41,7 @@ jobs:
           for script in install.sh s-ui.sh deploy/*.sh; do bash -n "$script"; done
           docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-traffic-review-setup.sh
           docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-configure-billing.sh
+          docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-uninstall.sh
 
       - name: Test Cloudflare certificate domains
         run: docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-cloudflare-ssl.sh
