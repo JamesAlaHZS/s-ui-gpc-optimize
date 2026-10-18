@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: "26"
   CRONET_GO_REPO: https://github.com/sagernet/cronet-go.git
@@ -350,7 +354,8 @@ jobs:
       always() &&
       needs.build-linux.result == 'success' &&
       needs.build-windows.result == 'success' &&
-      ((github.event_name == 'release' && github.event.action == 'published') ||
+      ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) ||
+      (github.event_name == 'release' && github.event.action == 'published') ||
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')))
     runs-on: ubuntu-26.04
     permissions:
@@ -376,8 +381,10 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+          tag: ${{ github.ref == 'refs/heads/main' && format('build-{0}', github.sha) || github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+          target_commit: ${{ github.sha }}
           file: dist/*
           file_glob: true
-          prerelease: true
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+          make_latest: ${{ github.ref == 'refs/heads/main' }}
           overwrite: true

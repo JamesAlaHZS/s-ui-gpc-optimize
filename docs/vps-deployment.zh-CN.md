@@ -2,6 +2,18 @@
 
 适用：Ubuntu 22.04 / Debian 12 及以上，systemd；支持首次安装和已有面板升级。默认安装路径 `/usr/local/s-ui`、服务名 `s-ui`、面板以 root 运行。其他路径/服务用户先对应修改；非 root 面板与采集器应使用同一个 UID。不要运行上游一键安装器覆盖这个 fork。
 
+## 从 GitHub 一键安装/升级
+
+本仓库的 main 构建全部通过后会发布带 SHA256SUMS 的完整 Release。root 在 VPS 执行：
+
+```bash
+SUI_LANG=zhcn bash <(curl -fsSL https://raw.githubusercontent.com/JamesAlaHZS/s-ui-gpc-optimize/main/install.sh)
+```
+
+此命令从 **JamesAlaHZS/s-ui-gpc-optimize** 下载最新发布包；在 systemd 系统自动安装 conntrack、检测公网接口、启用内核连接记账、启动独立采集器并开启面板「流量审查」。原面板的交互配置流程保留，升级保留数据库。新安装也可在提示中修改端口、路径、管理员账号密码。非 systemd 系统仅安装原面板，采集器需手工配置。
+
+后续运行 `s-ui` 打开管理菜单，其安装、升级和脚本更新地址均使用此 fork。真实 GCP 账单同步仍需第 5 节的项目 ID / 数据集 / IAM 配置，不会自动启用账单定时器。下面第 1～4 节仍可用于手工安装。
+
 ## 功能架构
 
 ```mermaid
