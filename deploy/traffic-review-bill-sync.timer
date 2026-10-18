@@ -1,0 +1,11 @@
+[Unit]
+Description=Run S-UI BigQuery Standard usage export sync every 12 hours
+
+[Timer]
+OnCalendar=*-*-* 00,12:15:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=traffic-review-bill-sync.service
+
+[Install]
+WantedBy=timers.target

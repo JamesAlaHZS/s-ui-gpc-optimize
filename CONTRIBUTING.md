@@ -35,10 +35,11 @@ Please be respectful and constructive when interacting with maintainers and othe
 ```bash
 git clone https://github.com/alireza0/s-ui
 cd s-ui
-git submodule update --init --recursive
 ```
 
-The **frontend** lives in a submodule. If you only work on the backend, you can use the existing `web/html` contents or build the frontend once (see below).
+This fork tracks the **frontend** sources directly, pinned from upstream commit
+`abd7f342f6f6dcb626bcf70a25b092f4727a4f2d`. No separate frontend fork or
+submodule update is needed. See `docs/traffic-review.md` for the local collector.
 
 ### Backend-Only Development (quickest)
 
@@ -61,7 +62,7 @@ The **frontend** lives in a submodule. If you only work on the backend, you can 
 
 ### Full Stack (Backend + Frontend)
 
-1. **Frontend** (separate repo in submodule):
+1. **Frontend** (tracked in this fork):
 
    ```bash
    cd frontend
@@ -118,7 +119,6 @@ documents the per-platform deltas (Windows and Docker swap `with_musl` for `with
 ```bash
 git clone https://github.com/alireza0/s-ui
 cd s-ui
-git submodule update --init --recursive
 docker build -t s-ui .
 # or: docker compose up -d
 ```

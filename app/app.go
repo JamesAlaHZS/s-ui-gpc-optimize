@@ -54,6 +54,10 @@ func (a *APP) Init() error {
 }
 
 func (a *APP) Start() error {
+	if err := service.StartTrafficReview(a.core); err != nil {
+		// Optional review failures must not stop the existing proxy service.
+		logger.Warning("local traffic review unavailable:", err)
+	}
 	loc, err := a.SettingService.GetTimeLocation()
 	if err != nil {
 		return err
@@ -112,6 +116,7 @@ func (a *APP) Stop() {
 	if err != nil {
 		logger.Warning("stop Core err:", err)
 	}
+	service.StopTrafficReview()
 }
 
 func (a *APP) initLog() {

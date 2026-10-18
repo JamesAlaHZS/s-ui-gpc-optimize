@@ -5,11 +5,11 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
 if [ ! -d frontend ]; then
-    echo "frontend/ is missing. Run: git submodule update --init --recursive" >&2
+    echo "frontend/ is missing. Restore the tracked frontend source for this fork." >&2
     exit 1
 fi
 
-(cd frontend && npm i && npm run build)
+(cd frontend && npm ci && npm run build)
 
 echo "Backend"
 
@@ -18,7 +18,9 @@ rm -fr web/html/*
 cp -R frontend/dist/* web/html/
 
 . "$ROOT/build-tags.sh"
-TAGS=$(tags_for dev)
-LDFLAGS=$(ldflags_for dev)
+PROFILE="${SUI_BUILD_PROFILE:-dev}"
+TAGS=$(tags_for "$PROFILE")
+LDFLAGS=$(ldflags_for "$PROFILE")
 
-go build -ldflags "$LDFLAGS -extldflags \"-Wl,-no_warn_duplicate_libraries\"" -tags "$TAGS" -o sui main.go
+go build -ldflags "$LDFLAGS" -tags "$TAGS" -o sui main.go
+go build -o traffic-review ./cmd/traffic-review

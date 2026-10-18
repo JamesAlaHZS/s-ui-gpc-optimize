@@ -1,0 +1,67 @@
+[
+  {
+    "date": "2026-10-17",
+    "projectID": "example-oregon-project",
+    "skuID": "4986-FDE4-A69A",
+    "description": "Network Standard Data Transfer Out to Internet from Oregon",
+    "invoiceMonth": "202610",
+    "usageAmount": "69.03",
+    "usageUnit": "GiB",
+    "cost": "0.00",
+    "credits": "0",
+    "currency": "USD",
+    "exportTime": 1760745600
+  },
+  {
+    "date": "2026-10-17",
+    "projectID": "example-oregon-project",
+    "skuID": "DE9E-AFBC-A15A",
+    "description": "Network Inter Zone Data Transfer Out",
+    "invoiceMonth": "202610",
+    "usageAmount": "0.02",
+    "usageUnit": "GiB",
+    "cost": "0.00",
+    "credits": "0",
+    "currency": "USD",
+    "exportTime": 1760745600
+  },
+  {
+    "date": "2026-10-17",
+    "projectID": "example-oregon-project",
+    "skuID": "ACC0-9F23-6029",
+    "description": "Network Inter Region Data Transfer Out from Americas to Las Vegas",
+    "invoiceMonth": "202610",
+    "usageAmount": "0",
+    "usageUnit": "GiB",
+    "cost": "0.00",
+    "credits": "0",
+    "currency": "USD",
+    "exportTime": 1760745600
+  },
+  {
+    "date": "2026-10-17",
+    "projectID": "example-oregon-project",
+    "skuID": "C863-37DA-506E",
+    "description": "Network Inter Region Data Transfer Out from Americas to Virginia",
+    "invoiceMonth": "202610",
+    "usageAmount": "0",
+    "usageUnit": "GiB",
+    "cost": "0.00",
+    "credits": "0",
+    "currency": "USD",
+    "exportTime": 1760745600
+  },
+  {
+    "date": "2026-10-17",
+    "projectID": "example-oregon-project",
+    "skuID": "984A-1F27-2D1F",
+    "description": "Network Data Transfer Out via Carrier Peering Network - Americas Based",
+    "invoiceMonth": "202610",
+    "usageAmount": "10.3",
+    "usageUnit": "GiB",
+    "cost": "0.82",
+    "credits": "0",
+    "currency": "USD",
+    "exportTime": 1760745600
+  }
+]

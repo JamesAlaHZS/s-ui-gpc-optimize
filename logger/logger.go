@@ -38,7 +38,7 @@ func InitLogger(level logging.Level) {
 			inContainer = true
 		}
 	}
-	if inContainer {
+	if inContainer || os.Getenv("SUI_LOG_STDERR") == "true" {
 		backend = logging.NewLogBackend(os.Stderr, "", 0)
 		format = logging.MustStringFormatter(`%{time:2006/01/02 15:04:05} %{level} - %{message}`)
 	} else {

@@ -143,6 +143,12 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	// Serve index.html as the entry point
 	// Handle all other routes by serving index.html
 	engine.NoRoute(func(c *gin.Context) {
+		// Unknown methods/actions on the read-only review API are not SPA
+		// navigation and must not turn into a successful HTML response.
+		if strings.HasPrefix(c.Request.URL.Path, base_url+"api/traffic-review/") {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
 		if c.Request.URL.Path == strings.TrimSuffix(base_url, "/") {
 			c.Redirect(http.StatusTemporaryRedirect, base_url)
 			return

@@ -1,0 +1,24 @@
+[Unit]
+Description=S-UI local traffic review 12h BigQuery Standard usage export sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sui-monitor
+Group=sui-monitor
+UMask=0077
+StateDirectory=s-ui-traffic-review
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/s-ui-traffic-review
+EnvironmentFile=/etc/s-ui/traffic-review-billing.env
+ExecStart=/usr/local/bin/traffic-review sync-bill --db /var/lib/s-ui-traffic-review/review.db --query-project ${GCP_QUERY_PROJECT} --dataset-project ${GCP_DATASET_PROJECT} --dataset ${GCP_BILLING_DATASET} --table ${GCP_BILLING_TABLE} --target-project ${GCP_TARGET_PROJECT} --lookback-days 7 --max-bytes 67108864 --max-monthly-bytes 4160749568 --adc
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+PrivateDevices=yes
+MemoryMax=64M
+StandardOutput=null
+StandardError=append:/var/lib/s-ui-traffic-review/bill-sync.err
