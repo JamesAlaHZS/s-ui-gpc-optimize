@@ -4,7 +4,7 @@ set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo 'Traffic review setup requires root.' >&2; exit 1; }
 [[ -d /run/systemd/system ]] || { echo 'Automatic traffic review setup requires systemd.' >&2; exit 1; }
-test -x /usr/local/s-ui/traffic-review
+test -f /usr/local/s-ui/traffic-review
 source /etc/os-release
 
 if ! command -v conntrack >/dev/null 2>&1; then

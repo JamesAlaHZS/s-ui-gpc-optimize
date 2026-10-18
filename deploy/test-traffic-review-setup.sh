@@ -5,7 +5,7 @@ test -f /.dockerenv || { echo 'This test requires a disposable container.' >&2; 
 mkdir -p /run/systemd/system /etc/systemd/system /usr/local/s-ui/deploy /etc/sysctl.d /tmp/mock-bin
 cp /src/deploy/*.service /src/deploy/*.timer /usr/local/s-ui/deploy/
 printf '#!/bin/sh\nexit 0\n' >/usr/local/s-ui/traffic-review
-chmod +x /usr/local/s-ui/traffic-review
+# Archive permissions may differ; setup must install an executable itself.
 for name in sui-monitor panel-user; do
     if command -v useradd >/dev/null; then useradd --system "$name"; else adduser -S -D -H "$name"; fi
 done
