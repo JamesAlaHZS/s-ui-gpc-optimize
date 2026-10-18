@@ -53,7 +53,9 @@ SUI_TRAFFIC_REVIEW_INTERFACE=ens4 bash /usr/local/s-ui/deploy/setup-traffic-revi
 
 ## 3. 同步 GCP 账单
 
-这里的 GCP 指 Google Cloud。账单链路是 **GCP 结算 → BigQuery 标准费用导出 → VPS 本地数据库 → 页面**；网页刷新只读本地数据库。
+账单链路：**GCP 结算 → BigQuery 标准使用费用表 → VPS 服务账号查询 → 本地数据库 → 页面**。网页刷新只读本地数据库，定时器每天运行两次云端查询。以下示例均为占位值，请替换后再使用。
+
+需要准备：有权修改结算导出的 Google 账号、管理查询项目和数据集权限的账号，以及 VPS 的 root 权限。这些可以是同一个 Google 账号；VPS 查询实际使用的是虚拟机的服务账号。
 
 ### 第一步：获取 VPS 身份
 
@@ -63,13 +65,14 @@ VPS 执行：
 bash /usr/local/s-ui/deploy/configure-billing.sh --info
 ```
 
-记录 **VPS 项目 ID** 和 **服务账号邮箱**。不是你的 Google 登录邮箱；不要复制访问令牌，也不用下载 JSON 密钥。
+记录 **VPS 项目 ID** 和 **服务账号邮箱**。服务账号可能形如 `123456789012-compute@developer.gserviceaccount.com`，也可能是自建账号；以命令输出为准。不是你的 Google 登录邮箱；不需要下载 JSON 密钥。
 
 输出应包含 `https://www.googleapis.com/auth/cloud-platform`。如果没有：
 
-1. Google 控制台 → Compute Engine → 虚拟机实例 → 当前 VPS。
-2. 先停止虚拟机，再编辑“服务账号 / 访问权限范围”；启用“允许全面访问所有 Cloud API”，保存并启动。
-3. 此项只设置访问范围，实际权限仍由下面的 IAM 角色限制。停止实例会暂时中断代理；使用临时外部 IP 的实例重启后需核对 IP。
+1. Google 控制台 → **Compute Engine → 虚拟机实例** → 点击当前 VPS 名称。
+2. 在“API 和身份管理”核对服务账号及“Cloud API 访问权限范围”。默认范围可能不允许 BigQuery；不能只凭已经授予 IAM 角色判断。
+3. 点击顶部 **停止**，等待状态变为已停止，再点 **修改**。找到“访问权限范围”，选择 **允许全面访问所有 Cloud API**，保存并启动实例。
+4. SSH 重新连接后，再运行 `--info`，确认出现上述 `cloud-platform` 地址。此项只设置访问范围，实际权限仍由 IAM 角色限制。停机会中断代理；使用临时外部 IP 时需重新核对地址。
 
 如果没有关联服务账号，先创建专用服务账号，再在该处关联。普通非 GCE VPS 不能使用本程序的 VM 元数据认证方式。
 
@@ -78,34 +81,40 @@ bash /usr/local/s-ui/deploy/configure-billing.sh --info
 ### 第二步：开启标准费用导出
 
 1. Google 控制台 → **结算** → 选择 VPS 所属结算账号。
-2. **结算导出 → BigQuery 导出 → 标准使用费用**，点击编辑设置。
+2. **结算导出 → BigQuery 导出 → 标准使用费用（Standard usage cost）**，点击启用或编辑设置。
 3. 选择保存账单的项目。该项目需启用结算，并关联同一结算账号；可直接用 VPS 项目。
-4. 在 BigQuery 中创建数据集，例如 `billing_export`。新建时可选 `US` 多区域：首次启用支持历史回填；已有区域数据集可以继续使用，但不保证有启用前的历史账单。
-5. 选中这个数据集并保存导出设置。只需要 **标准使用费用**，不需要开启详细费用、价格或 FOCUS 导出。
-6. 打开 BigQuery → Explorer / 资源管理器 → 项目 → 数据集，等待自动出现表：`gcp_billing_export_v1_……`。
+4. 没有数据集时，创建数据集：ID 填 `billing_export`，位置类型选 **多区域**，位置选 **US**；其他选项保持默认。
+5. 选中数据集并保存，确认“标准使用费用”显示已启用。本工具只读取标准表，无需为它开启详细使用费用、价格或 FOCUS 导出；已有其他用途的导出可保留。
+6. 打开 **BigQuery → Explorer / 资源管理器 → 保存账单的项目 → billing_export**，等待自动出现表：`gcp_billing_export_v1_……`。不要手工创建空表冒充账单表。
 
-首次出现数据可能要几小时；初次历史回填可能持续 5 天。Google 不保证固定导出延迟。不要因为刚启用没有表就反复重建。[官方设置与延迟说明](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-setup)。
+**US 多区域与 us-west1 单区域不同**：首次启用时，US/EU 多区域支持从上月月初回填；`us-west1` 等支持的单区域仅导出启用当日起的数据。已建数据集不能直接修改位置，切换导出数据集也不会自动搬入旧表历史。按历史需求选位置，不以 VPS 同区作为最低费用保证。[官方位置与回填规则](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-setup)
 
-在表的“详情”复制表 ID，例如：
-
-```text
-example-vps.billing_export.gcp_billing_export_v1_012345_ABCDEF_678901
-└ 项目 ID   └ 数据集 ID    └ 完整表名（这一段全部复制）
-```
+首次出现数据可能要几小时；历史回填按时间先后进行，追上当前用量可能需 5 天。Google 不保证固定延迟，也没有“最长 24 小时一定有表”的承诺。刚启用没有表时先核对设置并等待。[官方数据延迟说明](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables)
 
 ### 第三步：给 VPS 服务账号授权
 
 使用有权限的 Google 管理账号在控制台操作：
 
-1. 切换到 **运行查询的项目**（通常用 VPS 项目），确认启用了 **BigQuery API**：API 和服务 → 库 → 搜索 BigQuery API → 启用。
-2. IAM 和管理 → IAM → 授予访问权限。
+1. 顶部切换到 **查询项目**（通常用 VPS 项目）：**API 和服务 → 库 → 搜索 BigQuery API**，确认已启用。
+2. **IAM 和管理 → IAM → 授予访问权限**。
 3. 新主账号填第一步的 **VPS 服务账号邮箱**，添加 **BigQuery 作业用户**（`roles/bigquery.jobUser`），保存。
-4. BigQuery → 账单所在项目 → 选中 **账单数据集** → 共享 / 权限 → 添加主账号。
-5. 填同一个服务账号邮箱，添加 **BigQuery 数据查看者**（`roles/bigquery.dataViewer`），保存。权限授予数据集即可。
+4. **BigQuery → 账单所在项目 → 选中 billing_export 数据集 → 共享 / 管理权限 → 添加主账号**。
+5. 填同一个服务账号邮箱，添加 **BigQuery 数据查看者**（`roles/bigquery.dataViewer`），保存。权限授予该数据集即可。
 
-这两个权限作用不同：前者允许发起查询，后者允许读取账单。跨项目导出时，不能只给 VPS 项目加权限就结束。[BigQuery IAM 官方说明](https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam)。
+前者允许在查询项目提交作业，后者允许读取账单数据集。跨项目时两处都要核对。已有等效权限可复用；不需要为此新增 Editor（编辑者）等宽泛角色，也不要随意移除其他工作负载正在使用的权限。[BigQuery IAM 官方说明](https://docs.cloud.google.com/bigquery/docs/control-access-to-resources-iam)
 
-### 第四步：在 VPS 运行中文向导
+### 第四步：确认表名并填写向导
+
+在 BigQuery 中点击自动生成的标准表，打开“详情”，复制 **表 ID**，例如：
+
+```text
+your-dataset-project-id.billing_export.gcp_billing_export_v1_012345_ABCDEF_678901
+└ 数据集所在项目 ID      └ 数据集 ID    └ 表名（这一段全部复制）
+```
+
+如果表还没有出现，可在 **结算 → 账号管理** 读取结算账号 ID，例如 `012345-ABCDEF-678901`。标准表名通常是固定前缀加上将连字符改成下划线的账号 ID：`gcp_billing_export_v1_012345_ABCDEF_678901`。这只用于核对预期名称；**推导正确不代表表已创建**，以资源管理器中的实际表和向导预检为准。[官方账单表结构](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables)
+
+VPS 执行：
 
 ```bash
 sudo bash /usr/local/s-ui/deploy/configure-billing.sh
@@ -113,26 +122,31 @@ sudo bash /usr/local/s-ui/deploy/configure-billing.sh
 
 按下面对应填写，示例值请换成你的：
 
-| 提示 | 填什么 | 示例 |
-|---|---|---|
-| 查询项目 ID | 获得作业用户权限、启用 BigQuery API 的项目 | `example-vps` |
-| 账单数据集所在项目 ID | 表 ID 第一段 | `example-vps` |
-| 账单数据集 ID | 表 ID 第二段 | `billing_export` |
-| 完整表名 | 表 ID 第三段，保留全部字符 | `gcp_billing_export_v1_012345_ABCDEF_678901` |
-| 需要统计的 VPS 项目 ID | 产生 VPS 费用的项目 ID | `example-vps` |
+| 向导提示 | 配置项 | 去哪里找 / 填什么 | 占位示例 |
+|---|---|---|---|
+| 查询项目 ID | `GCP_QUERY_PROJECT` | 第三步已启用 API、已授予作业用户的项目 | `your-query-project-id` |
+| 账单数据集所在项目 ID | `GCP_DATASET_PROJECT` | 表 ID 第一段，保存账单表的项目 | `your-dataset-project-id` |
+| 账单数据集 ID | `GCP_BILLING_DATASET` | 表 ID 第二段 | `billing_export` |
+| 完整表名 | `GCP_BILLING_TABLE` | 表 ID 第三段，含完整前缀，不含项目、数据集或反引号 | `gcp_billing_export_v1_012345_ABCDEF_678901` |
+| 需要统计的 VPS 项目 ID | `GCP_TARGET_PROJECT` | 第一步 `--info` 输出的 VPS 项目 ID，用于筛选其费用 | `your-vm-project-id` |
 
-前三个“项目”都填写 **项目 ID**，不是显示名称、数字项目编号、结算账号 ID。提示有默认值时按回车即可接受。
+三个项目字段可以相同：若查询、账单表、VPS 都在同一项目，均填该 **项目 ID**。项目 ID 不是显示名称、数字项目编号或结算账号 ID。提示中的默认值正确时按回车接受。
 
-向导先执行预检，再同步最近 7 天；两步成功后才保存配置并开启每 12 小时同步。配置文件在 `/etc/s-ui/traffic-review-billing.env`，不存私钥。无需运行 `gcloud auth application-default login`。
+向导先空跑预检（dry-run，不实际执行查询），再同步最近 7 天。**两步都成功后**才写入 `/etc/s-ui/traffic-review-billing.env` 并启用定时器；失败时保留原配置和原定时器状态。向导自动识别同步服务用户并设置文件权限，不要把用户或组硬编码为 `sui-monitor`。不需要手工复制 systemd 文件，不需要运行 `gcloud auth application-default login`。
+
+预检失败按下方错误表处理，修正或等待表生成后再运行同一向导。`404` 不能证明 IAM 与认证已全部通过；不要把所有失败都当成“建表中”并无限重试。
 
 ### 第五步：确认同步成功
 
 ```bash
 systemctl list-timers traffic-review-bill-sync.timer --all
 systemctl status traffic-review-bill-sync.timer --no-pager
+date '+%F %T %Z'
 ```
 
-面板 → 出站流量 → **GCP 账单** → 时区选 **洛杉矶时间** → 日期先选昨天；昨天还未导出就选前天。查看“最近导入”“最新导出”和五项明细。没有数据显示“—”，不表示费用为零。
+当前定时器按 **VPS 系统时区每天 00:15 和 12:15** 触发，各附加最多 15 分钟随机延迟；停机错过的任务会在恢复后补跑。以 `list-timers` 的 NEXT 为准。这个时间与账单日期的洛杉矶时区是两回事。
+
+面板 → 出站流量 → **GCP 账单** → 时区选 **洛杉矶时间** → 日期先选昨天；昨天还未导出就选前天。查看“最近导入”“最新导出”和五项明细。未导出或无记录显示“—”，不表示费用为零。页面每 10 秒刷新本地数据，不会每 10 秒查询 BigQuery。
 
 后续手动立即同步：
 
@@ -144,18 +158,21 @@ sudo tail -n 40 /var/lib/s-ui-traffic-review/bill-sync.err
 
 服务执行成功后显示 `inactive (dead)` 是正常的，它是一次性任务；应检查退出码是否 `0/SUCCESS`，定时器是否 `active (waiting)`。日志文件会保留旧错误，结合最近执行时间判断。
 
-### 常见问题
+### 第六步：排错与历史补齐
 
 | 情况 | 处理 |
 |---|---|
 | `403` / `ACCESS_DENIED` | 核对授权对象是 VPS 服务账号；检查作业用户、数据集查看者、BigQuery API 和 cloud-platform 范围。权限生效后重跑向导。 |
-| `404` / `Not found` | 核对数据集所在项目与完整表名；确认标准导出已真正生成该表。 |
+| `404` / `Not found` | 核对项目、数据集、完整表名和报错中的位置；在 BigQuery 确认该表实际存在。刚启用时可等待后重跑；不能据此认定权限已全部正确。 |
+| `dry_run_ok`，但尚无导入 | 只说明预检成功，不代表已经导入。用中文向导完成首次实际同步，或已有配置时手动启动同步服务。 |
 | 元数据认证失败 | 确认这是 GCE 虚拟机、已关联服务账号，且网络可访问元数据服务。 |
 | `maximum bytes` / `budget` | 当前每次扫描上限 64 MiB、本程序月累计上限 3.875 GiB；不会自动加预算。不要反复重试，应先缩小手动查询日期或检查账单表规模。 |
 | 已导入但所选日期为空 | 查看最新导出时间；选择已导出的日期，时区用洛杉矶。首次自动同步只回看 7 天。 |
 | 五项都是空，但原始明细有记录 | 当前仅跟踪指定的俄勒冈标准出站、跨区和运营商互联等五项；其他地区或其他计费项目查“已导入账单明细”及 GCP 原账单。 |
 
-查询扫描上限仅约束本程序，不能限制其他 BigQuery 作业、存储或你另行购买的容量；导出和查询可能产生 BigQuery 费用。
+`404` 也可能表示请求位置与资源位置不匹配，需读完整错误，而不是只看状态码。[BigQuery 官方错误说明](https://docs.cloud.google.com/bigquery/docs/error-messages)
+
+查询扫描上限仅约束本程序，不能限制其他 BigQuery 作业、存储或容量费用；不是账户消费封顶。免费额度受计费方式、资格和其他作业用量影响，不能保证本方案零费用。[BigQuery 价格说明](https://cloud.google.com/bigquery/pricing)
 
 需要首次补齐最近 31 天时，在已有配置并且预检预算允许的情况下执行一次：
 
@@ -165,6 +182,7 @@ set -a
 . /etc/s-ui/traffic-review-billing.env
 set +a
 monitor=$(systemctl show traffic-review-bill-sync.service -p User --value)
+[[ -n "$monitor" && "$monitor" != root ]] || { echo '同步服务用户异常，先重新配置采集器'; exit 1; }
 args=(sync-bill --db /var/lib/s-ui-traffic-review/review.db
   --query-project "$GCP_QUERY_PROJECT" --dataset-project "$GCP_DATASET_PROJECT"
   --dataset "$GCP_BILLING_DATASET" --table "$GCP_BILLING_TABLE"
@@ -179,7 +197,9 @@ runuser -u "$monitor" -- /usr/local/bin/traffic-review "${args[@]}" --dry-run
 runuser -u "$monitor" -- /usr/local/bin/traffic-review "${args[@]}"
 ```
 
-不要给定时服务改成 31 天反复扫描。账单按项目、日期和计费项目汇总，不能单独分离该项目里某台 VPS，更不能确认某条连接的费用。200 GiB 是整个结算账号共享的标准出站参考，页面不把项目用量当作账号真实余量。
+不要给定时服务改成 31 天反复扫描。只有 Google 已导出的日期才可补齐；增加回看天数不能凭空恢复单区域启用前的数据。**不要把 `deploy/*example*` 样例导入生产数据库** `/var/lib/s-ui-traffic-review/review.db`；演示必须使用独立临时数据库。
+
+账单按项目、日期和计费项目汇总，不能单独分离该项目里某台 VPS，更不能确认某条连接的费用。200 GiB 是整个结算账号共享的标准出站参考，页面不把项目用量当作账号真实余量。
 
 ## 4. 中转是什么，如何配置
 
@@ -208,3 +228,50 @@ runuser -u "$monitor" -- /usr/local/bin/traffic-review "${args[@]}"
 本页不会自动修改路由。撤销时删除或禁用该规则，再应用更改；确认没有其他规则引用后再删除出站。
 
 中转不保证便宜：GCP 发往中转的数据、以及 GCP 发回客户端的数据，仍是 VPS 出站。比较费用要等待前后两段日期的真实账单导出，不能凭直连、域名或 IP 归属判断标准出站或运营商互联。
+
+## 5. SSL 证书申请与 Cloudflare 排错
+
+### 只申请输入的域名
+
+`s-ui` → **20. Cloudflare SSL Certificate** → **1. 申请**：
+
+1. 输入 `panel.example.com`：只申请 `panel.example.com`，不会追加 `*.panel.example.com`，也不会改为 `*.example.com`。
+2. 确实需要泛域名才输入 `*.example.com`。它覆盖 `a.example.com` 等一级子域，不覆盖 `example.com` 或 `a.b.example.com`。
+3. 旧脚本曾额外申请泛域名时，选择 **2. 强制重新申请**，重新输入准确域名，替换旧证书的域名范围。
+
+新流程使用限定站点的 API Token，不再混用 Global API Key。申请前检查域名、站点及 Token 的读取权限；不清空证书根目录，失败保留已有证书。
+
+### Token 与 Zone ID 怎么填
+
+1. Cloudflare → 个人资料 → **API Tokens → 创建 Token**，可用“编辑区域 DNS”模板。
+2. 权限保留 **Zone / DNS / Edit（区域 / DNS / 编辑）**，补充 **Zone / Zone / Read（区域 / 区域 / 读取）**。
+3. **Zone Resources → Include → Specific zone**，只选择所属站点 `example.com`；不需要扩大到账号内所有站点。
+4. 打开该站点的 **Overview / 概述**，复制 **Zone ID**（32 位字符）。不是 Account ID，也不是输入 `panel.example.com` 就创建一个新站点。
+5. 在脚本中粘贴 Token（输入时不显示），再粘贴 Zone ID。脚本会读取站点，确认它确实包含申请域名。
+
+DNS 验证使用 TXT 记录，不要求申请域名的 A/AAAA 记录先指向 VPS，也不要求关闭 Cloudflare 代理。要实际访问面板，仍需正确配置访问域名和面板证书路径。
+
+证书路径：`/root/cert-CF/panel.example.com/fullchain.pem`；私钥路径：`/root/cert-CF/panel.example.com/privkey.pem`。在面板填入对应路径并应用更改。泛域名的文件夹名保留字面的 `*`，在 shell 命令中引用整个路径时须加引号。
+
+### `invalid domain` 不代表哪一步已经成功
+
+acme.sh 的 Cloudflare 插件发现不到所属站点时也会报 `invalid domain`，不只是域名格式错误。排查顺序：
+
+| 现象 | 检查 |
+|---|---|
+| 站点读取失败或 `403` | Token 是否有效、有区域读取权限、站点资源是否选对；若 Token 限制来源 IP，核对 VPS 的实际出口 IP。 |
+| `/zones?name=example.com` 返回空数组 | 可能是站点名称、账号或 Token 资源范围不匹配。检查 API 的 `success/errors`；不要直接改成 All zones。 |
+| 能读取站点且有 Zone ID | 只证明可读取该站点，不证明可以写 TXT；继续检查 DNS 编辑权限。 |
+| TXT 写入失败 | 核对 DNS 编辑权限、站点范围、Token 有效期和来源 IP 条件。 |
+| 使用的是其他站点的 Zone ID | 重新复制正确站点的 Zone ID；新脚本会在申请前拒绝不匹配的域名。 |
+| 日志查询 `_acme-challenge.panel.example.com` 或其所属 `example.com` | 这是 DNS 验证和站点发现，不表示证书已被改成泛域名；以申请命令的 `-d` 和证书 SAN 为准。 |
+
+不要把 Token、Global API Key 或包含这些值的调试日志发到公开讨论中。脚本不会通过给账号添加所有站点权限来绕过错误，也不会删除其他证书或 ACME 账号配置。
+
+核对实际证书包含的域名：
+
+```bash
+openssl x509 -in /root/cert-CF/panel.example.com/fullchain.pem -noout -ext subjectAltName
+```
+
+依据：[acme.sh Cloudflare 插件](https://github.com/acmesh-official/acme.sh/blob/master/dnsapi/dns_cf.sh)、[Cloudflare Token 创建与站点资源限制](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)、[Cloudflare Zone ID](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/)。
