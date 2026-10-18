@@ -70,7 +70,12 @@ func (s *Store) RecordConntrack(epoch string, records []ConntrackRecord, local m
 		if r.Event != "new" && r.Event != "snapshot" && r.Event != "destroy" {
 			return errors.New("invalid conntrack event")
 		}
-		if !r.OrigBytesKnown || !r.ReplyBytesKnown {
+		peer, leg, origTX, known := Direction(r, local)
+		// NEW notifications normally precede the kernel accounting extension.
+		// Their missing counters establish a zero lifetime baseline, not a gap.
+		// The global conntrack dump also contains loopback and other-interface
+		// flows; absent counters there say nothing about this interface's data.
+		if known && r.Event != "new" && (!r.OrigBytesKnown || !r.ReplyBytesKnown) {
 			if _, e = tx.Exec("INSERT INTO review_alerts(at,kind,message,rule_version) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM review_alerts WHERE kind='byte_counter_gap' AND at>=?)", r.At, "byte_counter_gap", "A kernel flow lacks byte counters; absent counters are unknown, not zero traffic", s.rules.Version, r.At-60); e != nil {
 				return e
 			}
@@ -129,30 +134,30 @@ func (s *Store) RecordConntrack(epoch string, records []ConntrackRecord, local m
 		if r.Event == "destroy" {
 			flags |= 8
 		}
-		if fresh && r.Event != "new" {
+		if known && fresh && r.Event != "new" {
 			if _, e = tx.Exec("INSERT INTO review_alerts(at,kind,message,rule_version) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM review_alerts WHERE kind='flow_baseline_gap' AND at>=?)", r.At, "flow_baseline_gap", "Pre-existing or unmatched flow baselined; earlier lifetime bytes excluded", s.rules.Version, r.At-60); e != nil {
 				return e
 			}
 		}
-		peer, leg, origTX, known := Direction(r, local)
-		if known {
+		if known && (r.OrigBytesKnown || r.ReplyBytesKnown) {
 			fee, basis := s.rules.ClassifyPeer(peer)
 			d := Destination{Layer: "network", Peer: peer, Protocol: r.Protocol, Business: "unknown", Confidence: "unknown", Leg: leg, FeeStatus: fee, FeeBasis: basis}
 			if origTX {
 				d.TXBytes = origDelta
 				d.RXBytes = replyDelta
+				d.TXKnown = r.OrigBytesKnown
 			} else {
 				d.TXBytes = replyDelta
 				d.RXBytes = origDelta
+				d.TXKnown = r.ReplyBytesKnown
 			}
 			if e = addDestination(tx, r.At, d, s.rules.Version); e != nil {
 				return e
 			}
-		} else if origDelta > 0 || replyDelta > 0 {
-			if _, e = tx.Exec("INSERT INTO review_alerts(at,kind,message,rule_version) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM review_alerts WHERE kind='direction_gap' AND at>=?)", r.At, "direction_gap", "Flow cannot be mapped to monitored interface; excluded from attributed network bytes", s.rules.Version, r.At-60); e != nil {
-				return e
-			}
 		}
+		// A host-wide dump includes ordinary loopback, bridge and other-NIC
+		// connections. Excluding those, or ambiguous host-local tuples, is
+		// expected filtering rather than evidence of lost interface traffic.
 		if _, e = tx.Exec("INSERT INTO review_checkpoints VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET up=excluded.up,down=excluded.down,seen=MAX(seen,excluded.seen),known=excluded.known", id, prevOrig, prevReply, r.At, flags); e != nil {
 			return e
 		}

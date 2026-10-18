@@ -6,8 +6,10 @@ export type TrafficReviewEndpoint = typeof trafficReviewEndpoints[number]
 
 export interface TrafficReviewQuery {
   date?: string
+  startDate?: string
+  endDate?: string
   timezone: 'America/Los_Angeles' | 'Asia/Shanghai' | 'UTC'
-  leg?: '' | 'to_remote' | 'to_client'
+  leg?: '' | 'to_remote' | 'to_client' | 'unknown'
   layer?: 'network' | 'proxy'
   sort?: 'egress'
   limit?: number
@@ -145,9 +147,15 @@ export interface TrafficSummary {
   networkTotalBytes: number | null
   toRemoteEgressBytes: number | null
   toClientEgressBytes: number | null
+  unknownDirectionEgressBytes: number | null
+  egressDifferenceBytes: number | null
+  networkSampleCount: number | null
+  proxySampleCount: number | null
+  firstSampleAt: number | null
   lastSampleAt: number | null
   samplingSeconds: number
   partial: boolean
+  destinationDetailsPartial: boolean
   flowBillingConfirmed: boolean
   disclaimer: string
   billingOverview: TrafficBillingOverview | null

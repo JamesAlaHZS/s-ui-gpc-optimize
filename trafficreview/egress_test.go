@@ -53,13 +53,13 @@ func TestEgressRankingFiltersBeforeLimitAndKeepsLayersSeparate(t *testing.T) {
 }
 
 func TestEgressQueryValidation(t *testing.T) {
-	for _, query := range []string{"layer=network&leg=to_client&sort=egress", "layer=proxy&leg=to_remote&sort=total"} {
+	for _, query := range []string{"layer=network&leg=to_client&sort=egress", "layer=proxy&leg=to_remote&sort=total", "layer=network&leg=unknown&sort=egress", "layer=network&leg=&sort=egress"} {
 		q, _ := url.ParseQuery(query)
 		if _, err := ParseRange(q, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, query := range []string{"layer=network%27", "leg=unknown", "sort=tx%3BDROP"} {
+	for _, query := range []string{"layer=network%27", "leg=other", "sort=tx%3BDROP"} {
 		q, _ := url.ParseQuery(query)
 		if _, err := ParseRange(q, time.Now()); err == nil {
 			t.Fatalf("accepted %s", query)

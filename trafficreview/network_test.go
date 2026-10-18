@@ -40,3 +40,94 @@ func TestRemoteInitiatedUDPCountsReplyAsHostEgress(t *testing.T) {
 		t.Fatalf("remote-initiated counters mislabeled: %+v", rows)
 	}
 }
+
+func TestNewConntrackWithoutCountersIsNotAnAccountingGap(t *testing.T) {
+	s := testStore(t)
+	r := ConntrackRecord{At: 1000, Event: "new", Protocol: "tcp", RawID: "new-before-accounting", Original: FlowTuple{SourceIP: "192.0.2.10", DestinationIP: "198.51.100.7", SourcePort: 40000, DestinationPort: 443}, Reply: FlowTuple{SourceIP: "198.51.100.7", DestinationIP: "192.0.2.10", SourcePort: 443, DestinationPort: 40000}}
+	local := map[string]bool{"192.0.2.10": true}
+	if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.Summary(testRange())
+	if err != nil || before.NetworkSampleCount != 0 {
+		t.Fatalf("NEW without counters must remain unobserved: %+v, %v", before, err)
+	}
+	r.At, r.Event = 1010, "snapshot"
+	r.OrigBytesKnown, r.ReplyBytesKnown = true, true
+	r.OrigBytes, r.ReplyBytes = 70, 300
+	if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.Destinations(testRange())
+	if err != nil || len(rows) != 1 || rows[0].TXBytes != 70 || rows[0].RXBytes != 300 {
+		t.Fatalf("NEW must preserve a zero baseline for later counters: %+v, %v", rows, err)
+	}
+	var gaps int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM review_alerts WHERE kind='byte_counter_gap'").Scan(&gaps); err != nil || gaps != 0 {
+		t.Fatalf("normal NEW generated accounting gaps: %d, %v", gaps, err)
+	}
+}
+
+func TestNonMonitoredConntrackFlowsDoNotReportCollectionGaps(t *testing.T) {
+	s := testStore(t)
+	local := map[string]bool{"192.0.2.10": true}
+	for i, pair := range [][2]string{{"127.0.0.1", "127.0.0.53"}, {"::1", "::1"}, {"172.17.0.2", "172.17.0.3"}} {
+		r := ConntrackRecord{At: int64(1000 + i*120), Event: "snapshot", Protocol: "udp", Original: FlowTuple{SourceIP: pair[0], DestinationIP: pair[1], SourcePort: 40000, DestinationPort: 53}, Reply: FlowTuple{SourceIP: pair[1], DestinationIP: pair[0], SourcePort: 53, DestinationPort: 40000}}
+		if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+			t.Fatal(err)
+		}
+		r.At, r.Event = r.At+10, "destroy"
+		r.OrigBytesKnown, r.ReplyBytesKnown = true, true
+		r.OrigBytes, r.ReplyBytes = 100, 900
+		if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM review_alerts").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("off-interface flows reported gaps: %d, %v", count, err)
+	}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM traffic_minutes").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("off-interface flows attributed to NIC: %d, %v", count, err)
+	}
+}
+
+func TestActualMissingCountersRetainMeasuredDirectionAndReportGap(t *testing.T) {
+	s := testStore(t)
+	r := ConntrackRecord{At: 1000, Event: "new", Protocol: "tcp", Original: FlowTuple{SourceIP: "198.51.100.7", DestinationIP: "192.0.2.10", SourcePort: 40000, DestinationPort: 443}, Reply: FlowTuple{SourceIP: "192.0.2.10", DestinationIP: "198.51.100.7", SourcePort: 443, DestinationPort: 40000}}
+	local := map[string]bool{"192.0.2.10": true}
+	if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+		t.Fatal(err)
+	}
+	r.At, r.Event = 1010, "snapshot"
+	r.ReplyBytesKnown, r.ReplyBytes = true, 600
+	if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.Destinations(testRange())
+	if err != nil || len(rows) != 1 || rows[0].TXBytes != 600 || rows[0].Leg != "to_client" {
+		t.Fatalf("known reply egress must survive missing original counter: %+v, %v", rows, err)
+	}
+	var gaps int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM review_alerts WHERE kind='byte_counter_gap'").Scan(&gaps); err != nil || gaps != 1 {
+		t.Fatalf("a real missing direction must remain visible: %d, %v", gaps, err)
+	}
+}
+
+func TestReceiveOnlyCounterDoesNotMakeUnknownEgressAnObservedZero(t *testing.T) {
+	s := testStore(t)
+	r := ConntrackRecord{At: 1000, Event: "new", Protocol: "tcp", Original: FlowTuple{SourceIP: "198.51.100.7", DestinationIP: "192.0.2.10", SourcePort: 40000, DestinationPort: 443}, Reply: FlowTuple{SourceIP: "192.0.2.10", DestinationIP: "198.51.100.7", SourcePort: 443, DestinationPort: 40000}}
+	local := map[string]bool{"192.0.2.10": true}
+	if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+		t.Fatal(err)
+	}
+	r.At, r.Event = 1010, "snapshot"
+	r.OrigBytesKnown, r.OrigBytes = true, 600
+	if err := s.RecordConntrack("boot", []ConntrackRecord{r}, local); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := s.Summary(testRange())
+	if err != nil || summary.NetworkIngressBytes != 600 || summary.NetworkSampleCount != 0 {
+		t.Fatalf("RX-only sample invented known zero TX: %+v, %v", summary, err)
+	}
+}

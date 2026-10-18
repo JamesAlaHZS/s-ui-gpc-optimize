@@ -1,6 +1,7 @@
 import HttpUtils from '@/plugins/httputil'
 import { reactive } from 'vue'
 import { adaptTrafficReviewData } from './trafficReviewAdapter'
+import { trafficRangeError } from './trafficReviewRange'
 import {
   emptyTrafficReviewStates,
   trafficReviewEndpoints,
@@ -24,18 +25,22 @@ export function createTrafficReviewPoller(
   let query: TrafficReviewQuery = { timezone: 'America/Los_Angeles' }
   let revision = 0
   let pendingRefresh = false
+  let queryValid = true
 
   async function refresh(): Promise<void> {
-    if (!active || loading) return
+    if (!active || loading || !queryValid) return
     loading = true
     const requestedRevision = revision
     const requestedQuery = { ...query }
     try {
       await Promise.all(trafficReviewEndpoints.map(async (endpoint) => {
         try {
+          const windowQuery = { date: requestedQuery.date, startDate: requestedQuery.startDate, endDate: requestedQuery.endDate, timezone: requestedQuery.timezone }
+          const destinationQuery: TrafficReviewQuery = { ...requestedQuery, layer: 'network', sort: 'egress', limit: 500 }
+          if (!destinationQuery.leg) delete destinationQuery.leg
           const result = await request(endpoint, endpoint === 'destinations'
-            ? { ...requestedQuery, layer: 'network', sort: 'egress', limit: 500 }
-            : { date: requestedQuery.date, timezone: requestedQuery.timezone })
+            ? destinationQuery
+            : windowQuery)
           if (!active || requestedRevision !== revision) return
           if (!result.success || result.obj == null) {
             states[endpoint].error = result.msg || 'No data returned'
@@ -63,15 +68,17 @@ export function createTrafficReviewPoller(
   }
 
   function setQuery(next: TrafficReviewQuery): void {
-    if (!active || (query.date ?? '') === (next.date ?? '') && query.timezone === next.timezone && (query.leg ?? '') === (next.leg ?? '')) return
+    if (!active || (query.date ?? '') === (next.date ?? '') && (query.startDate ?? '') === (next.startDate ?? '') && (query.endDate ?? '') === (next.endDate ?? '') && query.timezone === next.timezone && (query.leg ?? '') === (next.leg ?? '')) return
     query = { ...next }
+    queryValid = !trafficRangeError(next.startDate, next.endDate, next.timezone)
     revision++
     for (const endpoint of trafficReviewEndpoints) {
       states[endpoint].data = null
       states[endpoint].updatedAt = null
       states[endpoint].error = null
     }
-    if (loading) pendingRefresh = true
+    if (!queryValid) pendingRefresh = false
+    else if (loading) pendingRefresh = true
     else if (timer) void refresh()
   }
 

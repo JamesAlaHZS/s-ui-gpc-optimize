@@ -15,6 +15,7 @@
         prepend-icon="mdi-refresh"
         variant="tonal"
         :loading="refreshing"
+        :disabled="!!rangeError"
         @click="refresh"
       >
         {{ tr('refresh') }}
@@ -22,11 +23,19 @@
     </div>
     <div class="d-flex flex-wrap ga-3 mb-4">
       <v-text-field
-        v-model="selectedDate"
+        v-model="selectedStartDate"
         type="date"
         clearable
         hide-details
-        :label="tr('billingDate')"
+        :label="tr('startDate')"
+        style="max-width:220px"
+      />
+      <v-text-field
+        v-model="selectedEndDate"
+        type="date"
+        clearable
+        hide-details
+        :label="tr('endDate')"
         style="max-width:220px"
       />
       <v-select
@@ -36,8 +45,24 @@
         :label="tr('timezone')"
         style="max-width:280px"
       />
-      <span class="align-self-center text-body-medium">{{ tr(selectedDate ? 'selectedDay' : 'latestDay') }}</span>
+      <v-btn
+        class="align-self-center"
+        variant="tonal"
+        @click="clearRange"
+      >
+        {{ tr('latestDay') }}
+      </v-btn>
+      <span class="align-self-center text-body-medium">{{ tr('rangeHint') }}</span>
     </div>
+    <v-alert
+      v-if="rangeError"
+      type="warning"
+      variant="tonal"
+      class="mb-3"
+      data-testid="range-error"
+    >
+      {{ tr(rangeError) }}
+    </v-alert>
     <v-tabs
       v-model="tab"
       color="primary"
@@ -99,17 +124,38 @@
               cols="6"
               md="3"
             >
-              <p>{{ tr('toRemote') }}</p><strong class="text-headline-small d-block my-2">{{ formatBytes(summary?.lastSampleAt ? summary.toRemoteEgressBytes : null) }}</strong>
+              <p>{{ tr('toRemote') }}</p><strong class="text-headline-small d-block my-2">{{ formatBytes(hasNetworkSamples ? summary?.toRemoteEgressBytes : null) }}</strong>
             </v-col>
             <v-col
               cols="6"
               md="3"
             >
-              <p>{{ tr('toClient') }}</p><strong class="text-headline-small d-block my-2">{{ formatBytes(summary?.lastSampleAt ? summary.toClientEgressBytes : null) }}</strong>
+              <p>{{ tr('toClient') }}</p><strong class="text-headline-small d-block my-2">{{ formatBytes(hasNetworkSamples ? summary?.toClientEgressBytes : null) }}</strong>
             </v-col>
           </v-row>
           <p class="mt-3 text-body-medium text-medium-emphasis">
-            {{ tr('connectionHint') }} {{ tr('measurementNote') }}
+            {{ tr('connectionHint') }}
+          </p>
+          <p class="mt-2 text-body-medium">
+            {{ tr('unknownDirection') }}: {{ formatBytes(hasNetworkSamples ? summary?.unknownDirectionEgressBytes : null) }} · {{ tr('connectionTotal') }}: {{ formatBytes(hasNetworkSamples ? summary?.networkEgressBytes : null) }}
+          </p>
+          <p
+            v-if="!hasNetworkSamples"
+            class="text-body-small mt-2"
+          >
+            {{ tr('noConnectionRecords') }}
+          </p>
+          <p
+            class="mt-2 text-body-medium"
+            data-testid="egress-difference"
+          >
+            {{ tr('egressDifference') }}: {{ formatBytes(hasNetworkSamples && summary?.lastSampleAt ? summary.egressDifferenceBytes : null) }}
+          </p>
+          <p class="text-body-small">
+            {{ tr('differenceHint') }}
+          </p>
+          <p class="text-body-small mt-2">
+            {{ tr('measurementNote') }}
           </p>
         </source-card>
         <source-card
@@ -132,6 +178,15 @@
           :state="states.destinations"
           class="mb-4"
         >
+          <v-alert
+            v-if="summary?.destinationDetailsPartial"
+            type="info"
+            variant="tonal"
+            class="mb-3"
+            data-testid="detail-retention"
+          >
+            {{ tr('detailRetention') }}
+          </v-alert>
           <v-select
             v-model="selectedLeg"
             :items="directionOptions"
@@ -163,7 +218,26 @@
         </source-card>
         <v-expansion-panels variant="accordion">
           <v-expansion-panel :title="tr('advanced')">
-            <v-expansion-panel-text><p>{{ tr('rxTotal') }}: {{ formatBytes(summary?.lastSampleAt ? summary.rxBytes : null) }}</p><p>{{ tr('connectionTotal') }}: {{ formatBytes(summary?.networkEgressBytes) }}</p><p>{{ tr('proxyUpload') }}: {{ formatBytes(summary?.proxyUploadBytes) }}</p><p>{{ tr('proxyDownload') }}: {{ formatBytes(summary?.proxyDownloadBytes) }}</p></v-expansion-panel-text>
+            <v-expansion-panel-text>
+              <p>{{ tr('rxTotal') }}: {{ formatBytes(summary?.lastSampleAt ? summary.rxBytes : null) }}</p>
+              <p data-testid="proxy-upload">
+                {{ tr('proxyUpload') }}: {{ formatBytes(hasProxySamples ? summary?.proxyUploadBytes : null) }}
+              </p>
+              <p data-testid="proxy-download">
+                {{ tr('proxyDownload') }}: {{ formatBytes(hasProxySamples ? summary?.proxyDownloadBytes : null) }}
+              </p>
+              <p
+                v-if="!hasProxySamples"
+                class="text-body-small mt-2"
+              >
+                {{ tr('noProxyRecords') }}
+              </p>
+              <p class="text-body-small mt-2">
+                {{ tr('proxyHint') }}
+              </p>
+              <p>{{ tr('firstSample') }}: {{ formatTime(summary?.firstSampleAt) }}</p>
+              <p>{{ tr('lastSample') }}: {{ formatTime(summary?.lastSampleAt) }}</p>
+            </v-expansion-panel-text>
           </v-expansion-panel>
           <v-expansion-panel :title="tr('accountingTitle')">
             <v-expansion-panel-text>{{ tr('accountingDetail') }}</v-expansion-panel-text>
@@ -213,6 +287,12 @@
           </v-table>
           <p v-else>
             {{ tr('billEmpty') }}
+          </p><p
+            v-if="(overview?.otherSKUsCount ?? 0) > 0"
+            class="text-body-small mt-3"
+            data-testid="other-bill-items"
+          >
+            {{ tr('otherBillsHint') }}
           </p><p class="text-body-small mt-3">
             {{ tr('billScope') }}
           </p>
@@ -373,6 +453,9 @@ sudo bash /usr/local/s-ui/deploy/setup-traffic-review.sh</pre>
           endpoint="alerts"
           :state="states.alerts"
         >
+          <p class="text-body-small mb-3">
+            {{ tr('legacyAlertsHint') }}
+          </p>
           <v-list
             v-if="alerts?.length"
             density="compact"
@@ -397,20 +480,25 @@ import { useI18n } from 'vue-i18n'
 import SourceCard from '@/components/trafficReview/SourceCard.vue'
 import EgressChart from '@/components/trafficReview/EgressChart.vue'
 import { createTrafficReviewPoller } from '@/plugins/trafficReview'
+import { trafficRangeError } from '@/plugins/trafficReviewRange'
 import { outboundPeers, billingStatusKey, connectionErrorKey, relayRule } from '@/plugins/trafficReviewPresentation'
 import type { TrafficAlert, TrafficBillingRecord, TrafficDestination, TrafficHealth, TrafficSeriesPoint, TrafficSummary, TrafficReviewQuery } from '@/types/trafficReview'
 const { t, te, locale } = useI18n()
 const tr = (key: string) => t(`trafficReview.${key}`)
 const language = computed(() => locale.value === 'zhHans' ? 'zh-CN' : locale.value === 'zhHant' ? 'zh-TW' : locale.value)
 const tab = ref('overview')
-const selectedDate = ref('')
+const selectedStartDate = ref('')
+const selectedEndDate = ref('')
 const selectedTimezone = ref<TrafficReviewQuery['timezone']>('America/Los_Angeles')
+const rangeError = computed(() => trafficRangeError(selectedStartDate.value, selectedEndDate.value, selectedTimezone.value))
 const selectedLeg = ref<NonNullable<TrafficReviewQuery['leg']>>('')
 const timezoneOptions = computed(() => ['America/Los_Angeles', 'Asia/Shanghai', 'UTC'].map((value, index) => ({ value, title: tr(['pacific', 'shanghai', 'utc'][index]!) })))
-const directionOptions = computed(() => [{ value: '', title: tr('allDirections') }, { value: 'to_remote', title: tr('toRemote') }, { value: 'to_client', title: tr('toClient') }])
+const directionOptions = computed(() => [{ value: '', title: tr('allDirections') }, { value: 'to_remote', title: tr('toRemote') }, { value: 'to_client', title: tr('toClient') }, { value: 'unknown', title: tr('unknownDirection') }])
 const poller = createTrafficReviewPoller()
 const states = poller.states
 const summary = computed(() => states.summary.data as TrafficSummary | null)
+const hasNetworkSamples = computed(() => (summary.value?.networkSampleCount ?? 0) > 0)
+const hasProxySamples = computed(() => (summary.value?.proxySampleCount ?? 0) > 0)
 const series = computed(() => states.series.data as TrafficSeriesPoint[] | null)
 const alerts = computed(() => states.alerts.data as TrafficAlert[] | null)
 const health = computed(() => states.health.data as TrafficHealth | null)
@@ -420,7 +508,7 @@ const overview = computed(() => summary.value?.billingOverview ?? null)
 const hasBills = computed(() => overview.value?.targetSKUs.some(bucket => bucket.rowCount > 0) ?? false)
 const billingPanels = ref<string[]>(['setup'])
 const syncMode = computed(() => ({ offline_snapshot: 'syncOffline', standard_export_12h: 'syncBigQuery', manual_csv_fallback: 'syncManual' })[overview.value?.syncStatus.mode ?? ''] ?? 'unknown')
-const sampleStale = computed(() => !selectedDate.value && !!health.value?.lastSampleAt && Date.now() - health.value.lastSampleAt * 1000 > Math.max(30_000, (health.value.samplingSeconds ?? 10) * 3_000))
+const sampleStale = computed(() => !selectedStartDate.value && !selectedEndDate.value && !!health.value?.lastSampleAt && Date.now() - health.value.lastSampleAt * 1000 > Math.max(30_000, (health.value.samplingSeconds ?? 10) * 3_000))
 const refreshing = ref(false)
 const outboundTag = ref('relay-out')
 const domainInput = ref('')
@@ -434,18 +522,13 @@ function formatBytes(value: number | null | undefined): string {
 }
 function money(value: string | null | undefined, currency?: string) { return value == null ? currency === 'MIXED' ? tr('currencyMixed') : '—' : `${currency || ''} ${value}`.trim() }
 function formatTime(value: number | null | undefined): string { return value ? new Intl.DateTimeFormat(language.value, { dateStyle: 'short', timeStyle: 'medium', timeZone: selectedTimezone.value }).format(new Date(value * 1000)) : '—' }
-function legLabel(leg: string) { return tr(leg === 'to_remote' ? 'toRemote' : leg === 'to_client' ? 'toClient' : 'unknown') }
+function legLabel(leg: string) { return tr(leg === 'to_remote' ? 'toRemote' : leg === 'to_client' ? 'toClient' : 'unknownDirection') }
 function categoryLabel(category?: string) { return tr(`skuCategories.${category && te(`trafficReview.skuCategories.${category}`) ? category : 'other_sku'}`) }
 function alertLabel(kind: string) { return tr(`alerts.${te(`trafficReview.alerts.${kind}`) ? kind : 'other'}`) }
 async function copyRule() { if (!rule.value) return; try { await navigator.clipboard.writeText(JSON.stringify(rule.value, null, 2)); copyStatus.value = 'copied' } catch { copyStatus.value = 'copyFailed' } }
-async function refresh() { if (refreshing.value || poller.isLoading()) return; refreshing.value = true; try { await poller.refresh() } finally { refreshing.value = false } }
-watch([selectedDate, selectedTimezone, selectedLeg], ([date, timezone, leg]) => poller.setQuery({ ...(date ? { date } : {}), timezone, leg }))
-watch(tab, value => {
-  if (value === 'costs' && !selectedDate.value) {
-    selectedTimezone.value = 'America/Los_Angeles'
-    selectedDate.value = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'America/Los_Angeles' }).format(new Date(Date.now() - 86400000))
-  }
-})
+async function refresh() { if (rangeError.value || refreshing.value || poller.isLoading()) return; refreshing.value = true; try { await poller.refresh() } finally { refreshing.value = false } }
+function clearRange() { selectedStartDate.value = ''; selectedEndDate.value = '' }
+watch([selectedStartDate, selectedEndDate, selectedTimezone, selectedLeg], ([startDate, endDate, timezone, leg]) => poller.setQuery({ ...(startDate || endDate ? { startDate: startDate || '', endDate: endDate || '' } : {}), timezone, leg }))
 watch([outboundTag, domainInput], () => { copyStatus.value = '' })
 onMounted(() => poller.start())
 onUnmounted(() => poller.stop())

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alireza0/s-ui/service"
 )
@@ -167,8 +168,27 @@ func TestTrafficReviewRequiresRealCookieAndIsReadOnly(t *testing.T) {
 		}
 	}
 
+	// Every read surface accepts the same inclusive calendar-date window. A
+	// three-year request must not be rejected by the former 31-day limit.
+	for _, action := range []string{"summary", "series", "destinations", "alerts", "health", "billing", "billing-overview", "candidates"} {
+		status, body := reviewRequest(t, client, http.MethodGet, base+action+"?startDate=2024-01-01&endDate=2026-12-31&timezone=UTC", "")
+		if status != http.StatusOK || body["success"] != true {
+			t.Fatalf("three-year %s: %d %+v", action, status, body)
+		}
+		if action == "summary" {
+			obj := body["obj"].(map[string]any)
+			if obj["from"] != float64(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).Unix()) || obj["to"] != float64(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix()) {
+				t.Fatalf("inclusive calendar range changed: %+v", obj)
+			}
+			if obj["networkSampleCount"] != float64(0) || obj["proxySampleCount"] != float64(0) || obj["egressDifferenceBytes"] != float64(0) {
+				t.Fatalf("empty measurements need explicit observation counts: %+v", obj)
+			}
+		}
+	}
 	for _, bad := range []string{
 		"?timezone=Europe%2FLondon", "?date=2026-10-08&from=1", "?from=-1&to=2", "?from=10&to=9", "?limit=0", "?limit=501", "?date=not-a-date",
+		"?startDate=2024-01-01", "?startDate=2024-01-01&endDate=2027-01-01", "?startDate=2026-10-18&endDate=2026-10-17",
+		"?startDate=2024-01-01&endDate=2024-01-01&date=2024-01-01", "?startDate=2024-01-01&startDate=2025-01-01&endDate=2026-01-01",
 	} {
 		status, body := reviewRequest(t, client, http.MethodGet, base+"summary"+bad, "")
 		if status != http.StatusBadRequest || body["success"] != false {
