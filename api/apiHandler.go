@@ -29,6 +29,7 @@ func (a *APIHandler) initRouter(g *gin.RouterGroup) {
 	})
 	g.POST("/:postAction", a.postHandler)
 	g.GET("/:getAction", a.getHandler)
+	g.GET("/traffic-review/:reviewAction", a.trafficReview)
 }
 
 func (a *APIHandler) postHandler(c *gin.Context) {

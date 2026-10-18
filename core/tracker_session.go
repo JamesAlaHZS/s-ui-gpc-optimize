@@ -61,17 +61,28 @@ type SessionInfo struct {
 	Download    int64  `json:"down"`
 }
 
+// ReviewSnapshot carries cumulative per-session counters. Closed snapshots
+// preserve short-lived sessions that ended between review drains.
+type ReviewSnapshot struct {
+	SessionInfo
+	Closed bool `json:"closed"`
+}
+
+const closedReviewLimit = 8192
+
 var _ adapter.ConnectionTracker = (*SessionTracker)(nil)
 
 // SessionTracker replaces the former StatsTracker/ConnTracker pair: one wrap
 // per connection that both counts traffic and keeps the session closable, so a
 // user who was just removed from an inbound can actually be cut off.
 type SessionTracker struct {
-	access    sync.Mutex
-	inbounds  map[string]Counter
-	outbounds map[string]Counter
-	users     map[string]Counter
-	sessions  map[uint64]*Session
+	access              sync.Mutex
+	inbounds            map[string]Counter
+	outbounds           map[string]Counter
+	users               map[string]Counter
+	sessions            map[uint64]*Session
+	closedReview        []*Session
+	closedReviewDropped uint64
 	// nextID only has to be unique among live sessions, so it is a counter
 	// rather than a UUID: this runs on every connection.
 	nextID uint64
@@ -160,6 +171,11 @@ func (t *SessionTracker) leave(session *Session) {
 	t.access.Lock()
 	defer t.access.Unlock()
 	delete(t.sessions, session.ID)
+	if len(t.closedReview) < closedReviewLimit {
+		t.closedReview = append(t.closedReview, session)
+	} else {
+		t.closedReviewDropped++
+	}
 }
 
 func (t *SessionTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
@@ -235,22 +251,55 @@ func (t *SessionTracker) Sessions() []SessionInfo {
 
 	sessions := make([]SessionInfo, 0, len(live))
 	for _, session := range live {
-		sessions = append(sessions, SessionInfo{
-			ID:          strconv.FormatUint(session.ID, 10),
-			Inbound:     session.Inbound,
-			User:        session.User,
-			Outbound:    session.Outbound,
-			Network:     session.Network,
-			Source:      session.Source.String(),
-			Destination: session.Destination.String(),
-			Domain:      session.Domain,
-			Rule:        session.Rule,
-			CreatedAt:   session.CreatedAt.Unix(),
-			Upload:      session.Upload.Load(),
-			Download:    session.Download.Load(),
-		})
+		sessions = append(sessions, sessionInfo(session))
 	}
 	return sessions
+}
+
+// DrainReview returns cumulative counters for currently active sessions and
+// the final counters of sessions closed since the preceding drain. It never
+// touches the aggregate counters consumed by GetStats. Only pointer copies and
+// queue rotation occur under the tracker lock; address formatting and atomic
+// counter reads happen after unlocking, so network I/O is never blocked here.
+// The returned dropped count is the number of closed sessions lost to the
+// bounded queue since the preceding drain.
+func (t *SessionTracker) DrainReview() ([]ReviewSnapshot, uint64) {
+	t.access.Lock()
+	live := make([]*Session, 0, len(t.sessions))
+	for _, session := range t.sessions {
+		live = append(live, session)
+	}
+	closed := t.closedReview
+	t.closedReview = nil
+	dropped := t.closedReviewDropped
+	t.closedReviewDropped = 0
+	t.access.Unlock()
+
+	snapshots := make([]ReviewSnapshot, 0, len(live)+len(closed))
+	for _, session := range live {
+		snapshots = append(snapshots, ReviewSnapshot{SessionInfo: sessionInfo(session)})
+	}
+	for _, session := range closed {
+		snapshots = append(snapshots, ReviewSnapshot{SessionInfo: sessionInfo(session), Closed: true})
+	}
+	return snapshots, dropped
+}
+
+func sessionInfo(session *Session) SessionInfo {
+	return SessionInfo{
+		ID:          strconv.FormatUint(session.ID, 10),
+		Inbound:     session.Inbound,
+		User:        session.User,
+		Outbound:    session.Outbound,
+		Network:     session.Network,
+		Source:      session.Source.String(),
+		Destination: session.Destination.String(),
+		Domain:      session.Domain,
+		Rule:        session.Rule,
+		CreatedAt:   session.CreatedAt.Unix(),
+		Upload:      session.Upload.Load(),
+		Download:    session.Download.Load(),
+	}
 }
 
 // takeSessions removes every session matching the predicate and returns their
@@ -314,10 +363,11 @@ type sessionConn struct {
 }
 
 func (c *sessionConn) Close() error {
+	err := c.ExtendedConn.Close()
 	c.closeOnce.Do(func() {
 		c.tracker.leave(c.session)
 	})
-	return c.ExtendedConn.Close()
+	return err
 }
 
 func (c *sessionConn) Upstream() any {
@@ -340,10 +390,11 @@ type sessionPacketConn struct {
 }
 
 func (c *sessionPacketConn) Close() error {
+	err := c.PacketConn.Close()
 	c.closeOnce.Do(func() {
 		c.tracker.leave(c.session)
 	})
-	return c.PacketConn.Close()
+	return err
 }
 
 func (c *sessionPacketConn) Upstream() any {

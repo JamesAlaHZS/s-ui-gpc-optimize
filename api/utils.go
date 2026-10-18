@@ -78,7 +78,7 @@ func checkLogin(c *gin.Context) {
 		c.Next()
 		return
 	}
-	if c.GetHeader("X-Requested-With") == "XMLHttpRequest" {
+	if c.GetHeader("X-Requested-With") == "XMLHttpRequest" || c.Param("reviewAction") != "" {
 		// 401, not 200. The body still carries the old message so an older
 		// frontend keeps working, but a client should not have to match on
 		// English prose to find out its session expired.

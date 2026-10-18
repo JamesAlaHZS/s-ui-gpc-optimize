@@ -222,11 +222,14 @@ jobs:
           TAGS=$(tags_for "$PROFILE")
           LDFLAGS=$(ldflags_for "$PROFILE")
           go build -ldflags="$LDFLAGS -linkmode external -extldflags '-static'" -tags "$TAGS" -o sui main.go
+          go build -ldflags="-s -w -linkmode external -extldflags '-static'" -o traffic-review ./cmd/traffic-review
           file sui
           ldd sui 2>/dev/null || echo "Static binary confirmed"
 
           mkdir s-ui
           cp sui s-ui/
+          cp traffic-review s-ui/
+          cp -R deploy docs s-ui/
           cp s-ui.service s-ui/
           cp s-ui.sh s-ui/
 

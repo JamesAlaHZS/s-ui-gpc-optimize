@@ -1,0 +1,2 @@
+date,project_id,sku_id,description,usage_gib,cost,currency
+2026-01-15,example-project,EXAMPLE-SKU,Documentation-only example,0.125,0.012345,USD

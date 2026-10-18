@@ -1,0 +1,10 @@
+{
+  "version": "operator-example-v1",
+  "peerRules": [
+    {
+      "cidr": "198.51.100.0/24",
+      "feeClass": "carrier_candidate",
+      "reason": "Documentation-only example; replace only after reviewing local evidence. This does not confirm billing."
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[Unit]
+Description=S-UI local traffic review collector
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=sui-monitor
+Group=sui-monitor
+UMask=0077
+StateDirectory=s-ui-traffic-review
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/s-ui-traffic-review
+ExecStart=/usr/local/bin/traffic-review collect --db /var/lib/s-ui-traffic-review/review.db --interface ens4 --interval 10s --conntrack
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+PrivateDevices=yes
+MemoryMax=128M
+StandardOutput=null
+StandardError=append:/var/lib/s-ui-traffic-review/collector.err
+
+[Install]
+WantedBy=multi-user.target

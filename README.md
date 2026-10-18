@@ -1,4 +1,16 @@
 # S-UI
+
+This fork adds an authenticated **Traffic Review / 流量审查** menu, a separate
+local SQLite ledger, and a standalone network/conntrack collector. It does not
+use Google monitoring or billing APIs. Measurements and operator fee candidates
+are explicitly separated from manually imported project/day/SKU bill records;
+direct egress alone does not establish the billed network tier.
+
+Build this fork from its tracked backend **and frontend** sources. Upstream
+install/upgrade commands below install upstream S-UI, without this extension.
+See [deployment, accounting limits and rollback](docs/traffic-review.md).
+See [verification results and remaining limits](docs/traffic-review-validation.md).
+
 **An Advanced Web Panel • Built on SagerNet/Sing-Box**
 
 ![](https://img.shields.io/github/v/release/alireza0/s-ui.svg)
