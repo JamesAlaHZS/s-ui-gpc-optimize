@@ -1,0 +1,70 @@
+name: Publish verified installer packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/bootstrap-installer-release.yml]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The installer-only change can reuse the full, successful protocol
+      # builds. Any binary input change requires the normal release workflow.
+      - name: Verify source and successful build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/${GITHUB_REPOSITORY}/actions/runs/39110096931 --jq .conclusion)" = success
+          test "$(gh api repos/${GITHUB_REPOSITORY}/actions/runs/39110096931 --jq .head_sha)" = 3349150e323edb29b26ed9acbaf63ebfc7903f94
+          git diff --exit-code 3349150e323edb29b26ed9acbaf63ebfc7903f94 HEAD -- . ':(exclude).github/**' ':(exclude)README.md' ':(exclude)docs/**' ':(exclude)install.sh' ':(exclude)s-ui.sh' ':(exclude)deploy/*.sh'
+          for script in install.sh s-ui.sh deploy/setup-traffic-review.sh; do bash -n "$script"; done
+          docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-traffic-review-setup.sh
+
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: 39110096931
+          pattern: s-ui-*
+          merge-multiple: true
+          path: dist
+
+      - name: Package current installer with verified binaries
+        run: |
+          set -euo pipefail
+          for archive in dist/s-ui-linux-*.tar.gz; do
+            stage=$(mktemp -d)
+            tar -xzf "$archive" -C "$stage"
+            test -f "$stage/s-ui/sui"
+            test -f "$stage/s-ui/traffic-review"
+            rm -rf "$stage/s-ui/deploy" "$stage/s-ui/docs"
+            cp -R deploy docs "$stage/s-ui/"
+            cp s-ui.sh "$stage/s-ui/s-ui.sh"
+            chmod 0755 "$stage/s-ui/sui" "$stage/s-ui/traffic-review" "$stage/s-ui/s-ui.sh"
+            printf 'Core build: 3349150e323edb29b26ed9acbaf63ebfc7903f94\nInstaller: %s\nBinary inputs verified unchanged. Full release profile; Naive included on supported architectures.\n' "$GITHUB_SHA" >"$stage/s-ui/BUILD-INFO.txt"
+            tar -czf "$archive" -C "$stage" s-ui
+            rm -rf "$stage"
+          done
+          cd dist
+          sha256sum s-ui-* >SHA256SUMS
+
+      - uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: build-${{ github.sha }}
+          target_commit: ${{ github.sha }}
+          file: dist/*
+          file_glob: true
+          prerelease: false
+          make_latest: true
+          overwrite: true
