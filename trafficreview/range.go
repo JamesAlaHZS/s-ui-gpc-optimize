@@ -52,6 +52,16 @@ func ParseRange(q url.Values, now time.Time) (Range, error) {
 			return r, e
 		}
 	}
+	r.Layer, r.Leg, r.Sort = q.Get("layer"), q.Get("leg"), q.Get("sort")
+	if r.Layer != "" && r.Layer != "network" && r.Layer != "proxy" {
+		return r, errors.New("layer must be network or proxy")
+	}
+	if r.Leg != "" && r.Leg != "to_remote" && r.Leg != "to_client" {
+		return r, errors.New("leg must be to_remote or to_client")
+	}
+	if r.Sort != "" && r.Sort != "egress" && r.Sort != "total" {
+		return r, errors.New("sort must be egress or total")
+	}
 	if r.From < 0 || r.To <= r.From || r.To-r.From > 31*86400 || r.Limit < 1 || r.Limit > 500 {
 		return r, errors.New("range must be positive, at most 31 days, limit 1..500")
 	}

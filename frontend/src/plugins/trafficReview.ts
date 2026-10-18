@@ -33,7 +33,9 @@ export function createTrafficReviewPoller(
     try {
       await Promise.all(trafficReviewEndpoints.map(async (endpoint) => {
         try {
-          const result = await request(endpoint, requestedQuery)
+          const result = await request(endpoint, endpoint === 'destinations'
+            ? { ...requestedQuery, layer: 'network', sort: 'egress', limit: 500 }
+            : { date: requestedQuery.date, timezone: requestedQuery.timezone })
           if (!active || requestedRevision !== revision) return
           if (!result.success || result.obj == null) {
             states[endpoint].error = result.msg || 'No data returned'
@@ -61,7 +63,7 @@ export function createTrafficReviewPoller(
   }
 
   function setQuery(next: TrafficReviewQuery): void {
-    if (!active || (query.date ?? '') === (next.date ?? '') && query.timezone === next.timezone) return
+    if (!active || (query.date ?? '') === (next.date ?? '') && query.timezone === next.timezone && (query.leg ?? '') === (next.leg ?? '')) return
     query = { ...next }
     revision++
     for (const endpoint of trafficReviewEndpoints) {

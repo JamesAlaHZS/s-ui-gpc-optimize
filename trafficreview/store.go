@@ -250,7 +250,7 @@ func (s *Store) Summary(r Range) (Summary, error) {
 	if err != nil {
 		return v, err
 	}
-	err = s.db.QueryRow("SELECT COALESCE(SUM(CASE WHEN layer='proxy' THEN up ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='proxy' THEN down ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN rx ELSE 0 END),0) FROM traffic_minutes WHERE at>=? AND at<?", r.From/60*60, r.To).Scan(&v.ProxyUploadBytes, &v.ProxyDownloadBytes, &v.NetworkEgressBytes, &v.NetworkIngressBytes)
+	err = s.db.QueryRow("SELECT COALESCE(SUM(CASE WHEN layer='proxy' THEN up ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='proxy' THEN down ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN rx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' AND leg='to_remote' THEN tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' AND leg='to_client' THEN tx ELSE 0 END),0) FROM traffic_minutes WHERE at>=? AND at<?", r.From/60*60, r.To).Scan(&v.ProxyUploadBytes, &v.ProxyDownloadBytes, &v.NetworkEgressBytes, &v.NetworkIngressBytes, &v.ToRemoteEgressBytes, &v.ToClientEgressBytes)
 	v.NICTotalBytes = v.RXBytes + v.TXBytes
 	v.ProxyTotalBytes = v.ProxyUploadBytes + v.ProxyDownloadBytes
 	v.NetworkTotalBytes = v.NetworkEgressBytes + v.NetworkIngressBytes
@@ -321,7 +321,25 @@ func (s *Store) Series(r Range) ([]SeriesPoint, error) {
 }
 
 func (s *Store) Destinations(r Range) ([]Destination, error) {
-	rows, err := s.db.Query(`SELECT layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version,SUM(up),SUM(down),SUM(tx),SUM(rx) FROM traffic_minutes WHERE at>=? AND at<? GROUP BY layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version ORDER BY SUM(up)+SUM(down)+SUM(tx)+SUM(rx) DESC LIMIT ?`, r.From/60*60, r.To, r.Limit)
+	query := `SELECT layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version,SUM(up),SUM(down),SUM(tx),SUM(rx) FROM traffic_minutes WHERE at>=? AND at<?`
+	args := []any{r.From / 60 * 60, r.To}
+	if r.Layer != "" {
+		query += " AND layer=?"
+		args = append(args, r.Layer)
+	}
+	if r.Leg != "" {
+		query += " AND leg=?"
+		args = append(args, r.Leg)
+	}
+	query += " GROUP BY layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version ORDER BY "
+	if r.Sort == "egress" {
+		query += "SUM(CASE WHEN layer='proxy' THEN up ELSE tx END) DESC"
+	} else {
+		query += "SUM(up)+SUM(down)+SUM(tx)+SUM(rx) DESC"
+	}
+	query += ",peer,layer LIMIT ?"
+	args = append(args, r.Limit)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -1,3 +1,5 @@
+import { trafficReviewZhHant } from './trafficReview'
+
 export default {
   success: "成功",
   failed: "失敗",
@@ -52,7 +54,9 @@ export default {
     dns: "DNS",
     admins: "管理員",
     settings: "設定",
+    trafficReview: "出站流量",
   },
+  trafficReview: trafficReviewZhHant,
   main: {
     tiles: "資訊卡",
     gauges: "儀表板",

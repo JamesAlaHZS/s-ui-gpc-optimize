@@ -20,13 +20,13 @@
         variant="tonal"
         class="mb-3"
       >
-        {{ state.error }}
+        {{ t('trafficReview.requestFailed') }}
       </v-alert>
-      <p class="text-body-2 text-medium-emphasis mb-2">
-        {{ state.updatedAt ? `${t('trafficReview.updatedAt')} ${new Date(state.updatedAt).toLocaleString()}` : t('trafficReview.noData') }}
+      <p class="text-body-medium text-medium-emphasis mb-2">
+        {{ state.updatedAt ? `${t('trafficReview.updatedAt')} ${new Date(state.updatedAt).toLocaleString(locale === 'zhHans' ? 'zh-CN' : locale === 'zhHant' ? 'zh-TW' : locale)}` : t('trafficReview.noData') }}
       </p>
       <slot :data="state.data">
-        <p class="text-body-2">
+        <p class="text-body-medium">
           {{ t('trafficReview.noMeasurements') }}
         </p>
       </slot>
@@ -39,5 +39,5 @@ import { useI18n } from 'vue-i18n'
 import type { TrafficReviewEndpoint, TrafficReviewState } from '@/types/trafficReview'
 
 defineProps<{ endpoint: TrafficReviewEndpoint, state: TrafficReviewState }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 </script>

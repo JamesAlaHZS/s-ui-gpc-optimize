@@ -166,6 +166,8 @@ export function adaptTrafficReviewData(endpoint: TrafficReviewEndpoint, value: u
       networkEgressBytes: number(item.networkEgressBytes),
       networkIngressBytes: number(item.networkIngressBytes),
       networkTotalBytes: number(item.networkTotalBytes),
+      toRemoteEgressBytes: number(item.toRemoteEgressBytes),
+      toClientEgressBytes: number(item.toClientEgressBytes),
       lastSampleAt: number(item.lastSampleAt),
       samplingSeconds: number(item.samplingSeconds) ?? 0,
       partial: boolean(item.partial),
