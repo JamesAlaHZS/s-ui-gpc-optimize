@@ -1,6 +1,6 @@
 # VPS 部署：流量审查与 GCP 账单同步
 
-适用：已有 S-UI 的 Ubuntu 22.04 / Debian 12 及以上，systemd，默认安装路径 `/usr/local/s-ui`、服务名 `s-ui`、面板以 root 运行。其他路径/服务用户先对应修改；非 root 面板与采集器应使用同一个 UID。不要运行上游一键安装器覆盖这个 fork。
+适用：Ubuntu 22.04 / Debian 12 及以上，systemd；支持首次安装和已有面板升级。默认安装路径 `/usr/local/s-ui`、服务名 `s-ui`、面板以 root 运行。其他路径/服务用户先对应修改；非 root 面板与采集器应使用同一个 UID。不要运行上游一键安装器覆盖这个 fork。
 
 ## 功能架构
 
@@ -39,31 +39,44 @@ ssh root@VPS_IP
 
 ## 2. VPS 检查与备份
 
-以下每个代码块按顺序在同一个 root Bash 中执行。新装机器需先完成基础面板安装、修改初始账户密码和面板访问设置，再执行升级步骤。
+以下每个代码块按顺序在同一个 root Bash 中执行。已有面板先备份；首次安装会在启动前让你设置管理员账号密码。
 
 ```bash
 sudo -i
 set -euo pipefail
 uname -m
 getconf GNU_LIBC_VERSION
-systemctl show s-ui -p User -p ExecStart -p WorkingDirectory
-test -x /usr/local/s-ui/sui
 apt-get update
 apt-get install -y conntrack sqlite3 iproute2 curl
-
-REVIEW_BACKUP="/root/s-ui-backup-$(date +%Y%m%d-%H%M%S)"
-install -d -m 0700 "$REVIEW_BACKUP"
-systemctl stop s-ui
-cp -a /usr/local/s-ui "$REVIEW_BACKUP/"
-systemctl cat s-ui >"$REVIEW_BACKUP/s-ui.service.txt"
-printf '%s\n' "$REVIEW_BACKUP" > /root/s-ui-last-review-backup
-systemctl start s-ui
-printf 'Backup: %s\n' "$REVIEW_BACKUP"
 
 install -d -m 0700 /root/s-ui-review-package
 tar -xzf /root/s-ui-traffic-review-linux-amd64.tar.gz -C /root/s-ui-review-package
 cd /root/s-ui-review-package/s-ui
 ./sui -v
+
+if [ -x /usr/local/s-ui/sui ]; then
+  systemctl show s-ui -p User -p ExecStart -p WorkingDirectory
+  REVIEW_BACKUP="/root/s-ui-backup-$(date +%Y%m%d-%H%M%S)"
+  install -d -m 0700 "$REVIEW_BACKUP"
+  systemctl stop s-ui
+  cp -a /usr/local/s-ui "$REVIEW_BACKUP/"
+  systemctl cat s-ui >"$REVIEW_BACKUP/s-ui.service.txt"
+  printf '%s\n' "$REVIEW_BACKUP" >/root/s-ui-last-review-backup
+  systemctl start s-ui
+  printf 'Backup: %s\n' "$REVIEW_BACKUP"
+else
+  install -d -m 0755 /usr/local/s-ui
+  install -m 0755 ./sui /usr/local/s-ui/sui
+  install -m 0644 ./s-ui.service /etc/systemd/system/s-ui.service
+  read -r -p '管理员用户名: ' REVIEW_ADMIN_USER
+  read -r -s -p '管理员密码（至少 12 位）: ' REVIEW_ADMIN_PASS
+  printf '\n'
+  test -n "$REVIEW_ADMIN_USER"
+  test "${#REVIEW_ADMIN_PASS}" -ge 12
+  /usr/local/s-ui/sui admin -username "$REVIEW_ADMIN_USER" -password "$REVIEW_ADMIN_PASS"
+  unset REVIEW_ADMIN_PASS
+  /usr/local/s-ui/sui setting -port 2095 -path /app/
+fi
 ```
 
 Actions 包名称可能不同，替换上述 `tar` 文件名即可。备份短暂停止服务，以免直接复制活跃 SQLite 得到不一致的面板备份。
@@ -124,12 +137,14 @@ EOF
 systemctl stop s-ui
 install -m 0755 ./sui /usr/local/s-ui/sui
 systemctl daemon-reload
-systemctl start s-ui
+systemctl enable --now s-ui
 systemctl is-active s-ui
 /usr/local/s-ui/sui healthcheck
 ```
 
 登录原面板，打开「流量审查」，等待 10–20 秒。未登录 API 返回 401；页面没有额外公网端口。示例 IP 分类仅是假设，部署命令默认不启用示例规则；确认自己的规则后再同时给面板和采集器配置 `--rules`/`SUI_TRAFFIC_REVIEW_RULES`。
+
+首次安装先通过本机 SSH 隧道访问（本机新开终端执行 `ssh -L 12095:127.0.0.1:2095 root@VPS_IP`，浏览器打开 `http://127.0.0.1:12095/app/`）；公网面板使用另行配置的 HTTPS。新面板默认维护模式，还需在面板创建代理入口/用户并退出维护模式。本模块不创建代理协议或中转节点。
 
 ## 5. 配置 GCP 真实账单（可稍后启用）
 
