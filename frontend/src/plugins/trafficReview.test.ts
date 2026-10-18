@@ -6,6 +6,16 @@ describe('traffic review polling', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
+  it('filters and ranks destinations on the server without narrowing the VPS total', async () => {
+    const request = vi.fn(async (): Promise<TrafficReviewResponse> => ({ success: true, msg: '', obj: [] }))
+    const poller = createTrafficReviewPoller(request)
+    poller.setQuery({ timezone: 'UTC', leg: 'to_client' })
+    await poller.refresh()
+    expect(request).toHaveBeenCalledWith('destinations', { timezone: 'UTC', leg: 'to_client', layer: 'network', sort: 'egress', limit: 500 })
+    expect(request).toHaveBeenCalledWith('summary', { timezone: 'UTC', date: undefined })
+    poller.stop()
+  })
+
   it('does not overlap refreshes and ignores responses after unmount', async () => {
     const pending: Array<(value: TrafficReviewResponse) => void> = []
     const request = vi.fn(() => new Promise<TrafficReviewResponse>((resolve) => pending.push(resolve)))

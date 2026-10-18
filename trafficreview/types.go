@@ -12,6 +12,9 @@ type Range struct {
 	To       int64  `json:"to"`
 	Timezone string `json:"timezone"`
 	Limit    int    `json:"-"`
+	Layer    string `json:"-"`
+	Leg      string `json:"-"`
+	Sort     string `json:"-"`
 }
 
 func DefaultRange(now time.Time) Range {
@@ -30,6 +33,8 @@ type Summary struct {
 	NetworkEgressBytes   int64                     `json:"networkEgressBytes"`
 	NetworkIngressBytes  int64                     `json:"networkIngressBytes"`
 	NetworkTotalBytes    int64                     `json:"networkTotalBytes"`
+	ToRemoteEgressBytes  int64                     `json:"toRemoteEgressBytes"`
+	ToClientEgressBytes  int64                     `json:"toClientEgressBytes"`
 	LastSampleAt         int64                     `json:"lastSampleAt"`
 	SamplingSeconds      int                       `json:"samplingSeconds"`
 	Partial              bool                      `json:"partial"`

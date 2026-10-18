@@ -899,6 +899,8 @@ show_usage() {
     echo -e "s-ui disable      - Disable Autostart on OS Startup"
     echo -e "s-ui log          - Check s-ui Logs"
     echo -e "s-ui update       - Update"
+    echo -e "s-ui bill         - 配置 GCP 账单同步"
+    echo -e "s-ui bill --info  - 查看 VPS 项目与服务账号"
     echo -e "s-ui install      - Install"
     echo -e "s-ui uninstall    - Uninstall"
     echo -e "s-ui help         - Control Menu Usage"
@@ -1038,6 +1040,10 @@ if [[ $# > 0 ]]; then
         ;;
     "install")
         check_uninstall 0 && install 0
+        ;;
+    "bill")
+        shift
+        bash /usr/local/s-ui/deploy/configure-billing.sh "$@"
         ;;
     "uninstall")
         check_install 0 && uninstall 0

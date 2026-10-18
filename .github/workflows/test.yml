@@ -38,8 +38,9 @@ jobs:
 
       - name: Check installer and isolated traffic review setup
         run: |
-          for script in install.sh s-ui.sh deploy/setup-traffic-review.sh deploy/test-traffic-review-setup.sh; do bash -n "$script"; done
+          for script in install.sh s-ui.sh deploy/*.sh; do bash -n "$script"; done
           docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-traffic-review-setup.sh
+          docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-configure-billing.sh
 
       # A list pasted back into a workflow or Dockerfile compiles fine and then
       # drifts in silence. with_qui[c] so the pattern misses its own line.

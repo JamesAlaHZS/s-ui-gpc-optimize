@@ -1,15 +1,9 @@
 # S-UI
 
-This fork adds an authenticated **Traffic Review / 流量审查** menu, a separate
-local SQLite ledger, and a standalone network/conntrack collector. It does not
-use Google monitoring or billing APIs. Measurements and operator fee candidates
-are explicitly separated from manually imported project/day/SKU bill records;
-direct egress alone does not establish the billed network tier.
+本 fork 增加 **出站流量** 页面：公网网卡出站总量、方向排行、GCP 账单和中转配置说明。采集与账单存放在独立 SQLite；本机流量不等于 Google 计费分类。GCP 账单可通过虚拟机服务账号从 BigQuery 标准费用导出同步，不需要长期密钥。
 
-Build this fork from its tracked backend **and frontend** sources. Upstream
-install/upgrade commands below install upstream S-UI, without this extension.
-See [deployment, accounting limits and rollback](docs/traffic-review.md).
-See [verification results and remaining limits](docs/traffic-review-validation.md).
+已部署用户请看 **[出站流量、GCP 账单同步和中转逐步教程](docs/egress-and-billing.zh-CN.md)**。
+安装与回滚见 [VPS 部署](docs/vps-deployment.zh-CN.md)。构建时需同时使用本仓库后端和前端源码。
 
 **An Advanced Web Panel • Built on SagerNet/Sing-Box**
 

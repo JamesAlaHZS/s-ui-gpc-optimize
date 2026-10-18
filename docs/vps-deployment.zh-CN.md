@@ -1,5 +1,7 @@
 # VPS 部署：流量审查与 GCP 账单同步
 
+已部署用户请先看：[出站流量、GCP 账单同步和中转逐步教程](egress-and-billing.zh-CN.md)。
+
 适用：Ubuntu 22.04 / Debian 12 及以上，systemd；支持首次安装和已有面板升级。默认安装路径 `/usr/local/s-ui`、服务名 `s-ui`、面板以 root 运行。其他路径/服务用户先对应修改；非 root 面板与采集器应使用同一个 UID。不要运行上游一键安装器覆盖这个 fork。
 
 ## 从 GitHub 一键安装/升级
@@ -29,7 +31,7 @@ flowchart LR
   CSV[人工 CSV 备用] --> DB
   Sync --> DB
   DB --> API[登录后只读 API]
-  API --> UI[流量审查：总览 / 分类 / 费用 / 审计]
+  API --> UI[出站流量：总览 / GCP 账单 / 中转配置 / 采集诊断]
   DB --> Analysis[Carrier Peering 相关性候选]
   Analysis --> Preview[中转规则预览：默认待配置]
 ```

@@ -445,6 +445,9 @@ func (s *Store) BillingOverview(r Range, now time.Time) (BillingOverview, error)
 	if err != nil {
 		return BillingOverview{}, err
 	}
+	if len(bills) == 0 {
+		status.DataPending = true
+	}
 	overview := SummarizeBills(bills, status)
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
