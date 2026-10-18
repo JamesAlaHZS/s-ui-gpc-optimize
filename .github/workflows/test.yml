@@ -42,6 +42,14 @@ jobs:
           docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-traffic-review-setup.sh
           docker run --rm --network none -v "$PWD:/src:ro" ubuntu:26.04 bash /src/deploy/test-configure-billing.sh
 
+      - name: Test Cloudflare SSL without external API calls
+        run: |
+          docker build -t sui-ssl-test - <<'EOF'
+          FROM ubuntu:26.04
+          RUN apt-get update && apt-get install -y --no-install-recommends jq
+          EOF
+          docker run --rm --network none -v "$PWD:/src:ro" sui-ssl-test bash /src/deploy/test-cloudflare-ssl.sh
+
       # A list pasted back into a workflow or Dockerfile compiles fine and then
       # drifts in silence. with_qui[c] so the pattern misses its own line.
       - name: No hardcoded build tags

@@ -238,7 +238,7 @@
               </ol><p class="mt-3">
                 {{ tr('syncCommand') }}
               </p><pre class="command">sudo bash /usr/local/s-ui/deploy/configure-billing.sh</pre><a
-                href="https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-setup"
+                href="https://github.com/JamesAlaHZS/s-ui-gpc-optimize/blob/main/docs/egress-and-billing.zh-CN.md#3-同步-gcp-账单"
                 target="_blank"
                 rel="noopener noreferrer"
               >{{ tr('exportHelp') }}</a>
