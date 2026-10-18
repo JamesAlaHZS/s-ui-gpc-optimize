@@ -63,8 +63,8 @@
           {{ tr('collectorUnavailable') }}
         </v-alert>
         <v-alert
-          v-if="summary?.partial"
-          type="warning"
+          v-if="summary?.partial && summary.lastSampleAt"
+          type="info"
           variant="tonal"
           class="mb-3"
         >
