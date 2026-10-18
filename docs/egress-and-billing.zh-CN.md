@@ -229,49 +229,8 @@ runuser -u "$monitor" -- /usr/local/bin/traffic-review "${args[@]}"
 
 中转不保证便宜：GCP 发往中转的数据、以及 GCP 发回客户端的数据，仍是 VPS 出站。比较费用要等待前后两段日期的真实账单导出，不能凭直连、域名或 IP 归属判断标准出站或运营商互联。
 
-## 5. SSL 证书申请与 Cloudflare 排错
+## 5. SSL 证书域名
 
-### 只申请输入的域名
+Cloudflare 证书的原有操作流程和认证方式保持不变：`s-ui` → **20**，可使用 API Token（Account ID 可留空）或 Global API Key + 邮箱，无需填写 Zone ID。
 
-`s-ui` → **20. Cloudflare SSL Certificate** → **1. 申请**：
-
-1. 输入 `panel.example.com`：只申请 `panel.example.com`，不会追加 `*.panel.example.com`，也不会改为 `*.example.com`。
-2. 确实需要泛域名才输入 `*.example.com`。它覆盖 `a.example.com` 等一级子域，不覆盖 `example.com` 或 `a.b.example.com`。
-3. 旧脚本曾额外申请泛域名时，选择 **2. 强制重新申请**，重新输入准确域名，替换旧证书的域名范围。
-
-新流程使用限定站点的 API Token，不再混用 Global API Key。申请前检查域名、站点及 Token 的读取权限；不清空证书根目录，失败保留已有证书。
-
-### Token 与 Zone ID 怎么填
-
-1. Cloudflare → 个人资料 → **API Tokens → 创建 Token**，可用“编辑区域 DNS”模板。
-2. 权限保留 **Zone / DNS / Edit（区域 / DNS / 编辑）**，补充 **Zone / Zone / Read（区域 / 区域 / 读取）**。
-3. **Zone Resources → Include → Specific zone**，只选择所属站点 `example.com`；不需要扩大到账号内所有站点。
-4. 打开该站点的 **Overview / 概述**，复制 **Zone ID**（32 位字符）。不是 Account ID，也不是输入 `panel.example.com` 就创建一个新站点。
-5. 在脚本中粘贴 Token（输入时不显示），再粘贴 Zone ID。脚本会读取站点，确认它确实包含申请域名。
-
-DNS 验证使用 TXT 记录，不要求申请域名的 A/AAAA 记录先指向 VPS，也不要求关闭 Cloudflare 代理。要实际访问面板，仍需正确配置访问域名和面板证书路径。
-
-证书路径：`/root/cert-CF/panel.example.com/fullchain.pem`；私钥路径：`/root/cert-CF/panel.example.com/privkey.pem`。在面板填入对应路径并应用更改。泛域名的文件夹名保留字面的 `*`，在 shell 命令中引用整个路径时须加引号。
-
-### `invalid domain` 不代表哪一步已经成功
-
-acme.sh 的 Cloudflare 插件发现不到所属站点时也会报 `invalid domain`，不只是域名格式错误。排查顺序：
-
-| 现象 | 检查 |
-|---|---|
-| 站点读取失败或 `403` | Token 是否有效、有区域读取权限、站点资源是否选对；若 Token 限制来源 IP，核对 VPS 的实际出口 IP。 |
-| `/zones?name=example.com` 返回空数组 | 可能是站点名称、账号或 Token 资源范围不匹配。检查 API 的 `success/errors`；不要直接改成 All zones。 |
-| 能读取站点且有 Zone ID | 只证明可读取该站点，不证明可以写 TXT；继续检查 DNS 编辑权限。 |
-| TXT 写入失败 | 核对 DNS 编辑权限、站点范围、Token 有效期和来源 IP 条件。 |
-| 使用的是其他站点的 Zone ID | 重新复制正确站点的 Zone ID；新脚本会在申请前拒绝不匹配的域名。 |
-| 日志查询 `_acme-challenge.panel.example.com` 或其所属 `example.com` | 这是 DNS 验证和站点发现，不表示证书已被改成泛域名；以申请命令的 `-d` 和证书 SAN 为准。 |
-
-不要把 Token、Global API Key 或包含这些值的调试日志发到公开讨论中。脚本不会通过给账号添加所有站点权限来绕过错误，也不会删除其他证书或 ACME 账号配置。
-
-核对实际证书包含的域名：
-
-```bash
-openssl x509 -in /root/cert-CF/panel.example.com/fullchain.pem -noout -ext subjectAltName
-```
-
-依据：[acme.sh Cloudflare 插件](https://github.com/acmesh-official/acme.sh/blob/master/dnsapi/dns_cf.sh)、[Cloudflare Token 创建与站点资源限制](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)、[Cloudflare Zone ID](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/)。
+输入 `panel.example.com` 就只申请该域名；只有明确输入 `*.example.com` 才申请泛域名。脚本不会额外追加泛域名。修正旧证书时选择 **2. Force renew existing Certificates**，重新输入需要的域名。

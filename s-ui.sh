@@ -606,16 +606,11 @@ ssl_cert_issue() {
     fi
 
     local domain=""
-    read -r -p "证书域名（仅普通域名，泛域名请用 Cloudflare DNS 申请）：" domain
-    domain=${domain,,}
-    if ! ssl_valid_domain "$domain" || [[ "$domain" == \*.* ]]; then
-        LOGE '请输入不含协议、端口、路径的普通域名。'
-        return 1
-    fi
+    read -p "Please enter your domain name:" domain
     LOGD "your domain is:${domain},check it..."
     local currentCert=$(~/.acme.sh/acme.sh --list | tail -1 | awk '{print $1}')
 
-    if [[ -n "$currentCert" && "$currentCert" == "$domain" ]]; then
+    if [ ${currentCert} == ${domain} ]; then
         local certInfo=$(~/.acme.sh/acme.sh --list)
         LOGE "system already has certs here,can not issue again,current certs details:"
         LOGI "$certInfo"
@@ -625,7 +620,12 @@ ssl_cert_issue() {
     fi
 
     certPath="/root/cert/${domain}"
-    mkdir -p "$certPath" || return 1
+    if [ ! -d "$certPath" ]; then
+        mkdir -p "$certPath"
+    else
+        rm -rf "$certPath"
+        mkdir -p "$certPath"
+    fi
 
     local WebPort=80
     read -r -p "please choose which port do you use,default will be 80 port:" WebPort
@@ -637,20 +637,24 @@ ssl_cert_issue() {
     fi
     LOGI "will use port:${WebPort} to issue certs,please make sure this port is open..."
     ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-    ~/.acme.sh/acme.sh --issue -d "$domain" --standalone --httpport "$WebPort"
+    ~/.acme.sh/acme.sh --issue -d ${domain} --standalone --httpport ${WebPort}
     if [ $? -ne 0 ]; then
         LOGE "issue certs failed,please check logs"
-        return 1
+        # Guarded: with domain empty this expanded to ~/.acme.sh/ and took the
+        # whole acme.sh installation, including every other certificate.
+        [ -n "${domain}" ] && rm -rf ~/.acme.sh/"${domain}"
+        exit 1
     else
         LOGE "issue certs succeed,installing certs..."
     fi
-    ~/.acme.sh/acme.sh --installcert -d "$domain" \
-        --key-file "$certPath/privkey.pem" \
-        --fullchain-file "$certPath/fullchain.pem"
+    ~/.acme.sh/acme.sh --installcert -d ${domain} \
+        --key-file /root/cert/${domain}/privkey.pem \
+        --fullchain-file /root/cert/${domain}/fullchain.pem
 
     if [ $? -ne 0 ]; then
         LOGE "install certs failed,exit"
-        return 1
+        [ -n "${domain}" ] && rm -rf ~/.acme.sh/"${domain}"
+        exit 1
     else
         LOGI "install certs succeed,enable auto renew..."
     fi
@@ -668,97 +672,163 @@ ssl_cert_issue() {
     fi
 }
 
-# Validate before using a domain in certificate paths or acme arguments.
-ssl_valid_domain() {
-    local host="${1#\*.}" label
-    [[ ${#host} -le 253 && "$host" == *.* && ! "$host" =~ ^[0-9.]+$ ]] || return 1
-    [[ "$1" != *'*'* || "$1" == "*.$host" ]] || return 1
-    local -a labels
-    IFS=. read -r -a labels <<<"$host"
-    for label in "${labels[@]}"; do
-        [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || return 1
-    done
-    [[ "$host" != *. && "$host" != .* && "$host" != *..* ]]
-}
-
-ssl_cf_issue() (
-    # A subshell keeps credentials out of the menu and subsequent issuances.
-    umask 077
-    local domain token zone_id zone_name account_id response body status cert_dir
-    local -a force=()
-    [[ ${1:-} != force ]] || force=(--force)
-    read -r -p '证书域名（例如 panel.example.com；只有明确输入 *.example.com 才申请泛域名）：' domain
-    domain=${domain,,}
-    ssl_valid_domain "$domain" || { LOGE '域名无效：只填完整域名，不含协议、端口、路径或空格。'; return 1; }
-    echo "本次仅申请：$domain"
-    echo 'API Token：区域 → 区域 → 读取，以及区域 → DNS → 编辑；资源仅选该域名所属站点。'
-    read -r -s -p 'Cloudflare API Token：' token
-    echo
-    [[ "$token" =~ ^[A-Za-z0-9._-]+$ ]] || { LOGE 'Token 为空或格式错误。'; return 1; }
-    read -r -p '该域名所属站点的 Zone ID（不是 Account ID）：' zone_id
-    [[ "$zone_id" =~ ^[a-fA-F0-9]{32}$ ]] || { LOGE 'Zone ID 应为 32 位十六进制字符，请从站点概述复制。'; return 1; }
-    zone_id=${zone_id,,}
-    if ! command -v jq >/dev/null 2>&1; then
-        case "$release" in
-            ubuntu|debian|armbian) apt-get update && apt-get install -y jq ;;
-            centos|almalinux|rocky|oracle) yum install -y jq ;;
-            fedora) dnf install -y jq ;;
-            arch|manjaro|parch) pacman -S --needed --noconfirm jq ;;
-            alpine) apk add --no-cache jq ;;
-            opensuse-tumbleweed) zypper -n install jq ;;
-            *) LOGE '请先安装 jq 后重试。'; return 1 ;;
-        esac
-        command -v jq >/dev/null 2>&1 || { LOGE 'jq 安装失败。'; return 1; }
-    fi
-    # Pass the secret on stdin, not in curl's process arguments or logs.
-    response=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-        curl --disable --config - -sS --connect-timeout 10 --max-time 30 \
-            --write-out '\n%{http_code}' "https://api.cloudflare.com/client/v4/zones/$zone_id") || { LOGE 'Cloudflare 连接失败，请检查 VPS 网络。'; return 1; }
-    status=${response##*$'\n'}
-    body=${response%$'\n'*}
-    if [[ "$status" != 200 ]] || ! jq -e --arg id "$zone_id" '.success == true and .result.id == $id' <<<"$body" >/dev/null 2>&1; then
-        LOGE "Cloudflare 站点校验失败（HTTP $status）：检查 Token 是否有效、是否包含区域读取权限，以及 Zone ID 和站点资源范围是否正确。"
-        echo '无需把权限扩大到账号内所有站点；能读取站点也不代表具有 DNS 写入权限。'
-        return 1
-    fi
-    zone_name=$(jq -er '.result.name | strings | ascii_downcase' <<<"$body") || return 1
-    ssl_valid_domain "$zone_name" || { LOGE 'Cloudflare 返回的站点名称无效。'; return 1; }
-    local host="${domain#\*.}"
-    [[ "$host" == "$zone_name" || "$host" == *."$zone_name" ]] || { LOGE '输入的域名不属于这个 Zone ID，请选择正确的站点。'; return 1; }
-    account_id=$(jq -r '.result.account.id // empty' <<<"$body") || return 1
-    echo "站点校验通过：$zone_name；证书域名仍为：$domain"
-    [[ -x "$HOME/.acme.sh/acme.sh" ]] || install_acme || return 1
-    # Explicit token + Zone ID overrides inherited/saved account-wide zone hints.
-    unset CF_Key CF_Email CF_Account_ID CF_Zone_ID CF_Token
-    export CF_Token="$token" CF_Zone_ID="$zone_id"
-    [[ ! "$account_id" =~ ^[a-fA-F0-9]{32}$ ]] || export CF_Account_ID="$account_id"
-    "$HOME/.acme.sh/acme.sh" --issue --dns dns_cf --server letsencrypt \
-        --keylength ec-256 -d "$domain" "${force[@]}" || { LOGE '证书申请失败。若出现 invalid domain，检查 Zone ID、Token 范围和区域读取权限；TXT 写入失败检查 DNS 编辑权限。已有证书未删除。'; return 1; }
-    cert_dir="/root/cert-CF/$domain"
-    mkdir -p "$cert_dir" || return 1
-    chmod 700 /root/cert-CF "$cert_dir" || return 1
-    "$HOME/.acme.sh/acme.sh" --install-cert -d "$domain" --ecc \
-        --fullchain-file "$cert_dir/fullchain.pem" --key-file "$cert_dir/privkey.pem" || { LOGE '证书安装失败，请检查 acme.sh 输出。'; return 1; }
-    secure_cert_files "$cert_dir"
-    "$HOME/.acme.sh/acme.sh" --upgrade --auto-upgrade || LOGE '证书已安装，但 acme.sh 自动升级设置失败，请检查定时续期。'
-    echo "证书已安装：$cert_dir/fullchain.pem"
-    echo "私钥路径：$cert_dir/privkey.pem"
-    echo '在面板证书设置中填写这两个路径，再应用更改。泛域名不自动包含其根域名。'
-)
-
 ssl_cert_issue_CF() {
-    echo '1) 申请 Cloudflare DNS 证书（仅输入的域名）'
-    echo '2) 强制重新申请（修正旧证书或域名范围）'
-    echo '3) 返回菜单'
-    local choice
-    read -r -p '请选择 [1-3]：' choice
-    case "$choice" in
-        1) ssl_cf_issue || return 1 ;;
-        2) ssl_cf_issue force || return 1 ;;
-        3) ;;
-        *) LOGE '选项无效。'; return 1 ;;
+    echo -E ""
+    LOGD "******Instructions for use******"
+    echo "1) New certificate from Cloudflare"
+    echo "2) Force renew existing Certificates"
+    echo "3) Back to Menu"
+    read -p "Enter your choice [1-3]: " choice
+
+    certPath="/root/cert-CF"
+
+    case $choice in
+        1|2)
+            force_flag=""
+            if [ "$choice" -eq 2 ]; then
+                force_flag="--force"
+                echo "Forcing SSL certificate reissuance..."
+            else
+                echo "Starting SSL certificate issuance..."
+            fi
+            
+            LOGD "******Instructions for use******"
+            LOGI "This Acme script requires the following data:"
+            LOGI "1.Cloudflare credentials, either of:"
+            LOGI "   a) An API Token scoped to Zone:DNS:Edit (recommended)"
+            LOGI "   b) The account e-mail and the Global API Key (full account access)"
+            LOGI "2.The domain name that has been resolved DNS to the current server by Cloudflare"
+            LOGI "3.The script applies for a certificate. The default installation path is /root/cert "
+            confirm "Confirmed?[y/n]" "y"
+            if [ $? -eq 0 ]; then
+                if ! command -v ~/.acme.sh/acme.sh &>/dev/null; then
+                    echo "acme.sh could not be found. Installing..."
+                    install_acme
+                    if [ $? -ne 0 ]; then
+                        LOGE "Install acme failed, please check logs"
+                        exit 1
+                    fi
+                fi
+
+                CF_Domain=""
+                if [ ! -d "$certPath" ]; then
+                    mkdir -p $certPath
+                else
+                    rm -rf $certPath
+                    mkdir -p $certPath
+                fi
+
+                LOGD "Please set a domain name:"
+                read -p "Input your domain here: " CF_Domain
+                LOGD "Your domain name is set to: ${CF_Domain}"
+
+                CF_Token=""
+                CF_Account_ID=""
+                CF_GlobalKey=""
+                CF_AccountEmail=""
+                LOGD "Choose the Cloudflare authentication method:"
+                echo -e "${green}\t1.${plain} API Token, scoped to Zone:DNS:Edit (*recommended*)"
+                echo -e "${green}\t2.${plain} Global API Key + account e-mail (full account access)"
+                read -p "Enter your choice [1-2, default 1]: " cf_auth
+                cf_auth=${cf_auth:-1}
+
+                if [[ "${cf_auth}" == "2" ]]; then
+                    LOGD "Please set the Global API Key:"
+                    read -r -s -p "Input your key here: " CF_GlobalKey
+                    echo ""
+                    if [[ -z "${CF_GlobalKey}" ]]; then
+                        LOGE "Global API Key cannot be empty, script exiting..."
+                        exit 1
+                    fi
+
+                    LOGD "Please set up registered email:"
+                    read -p "Input your email here: " CF_AccountEmail
+                    if [[ -z "${CF_AccountEmail}" ]]; then
+                        LOGE "Registered email cannot be empty, script exiting..."
+                        exit 1
+                    fi
+                    LOGD "Your registered email address is: ${CF_AccountEmail}"
+                else
+                    LOGD "Please set the API Token:"
+                    read -r -s -p "Input your token here: " CF_Token
+                    echo ""
+                    if [[ -z "${CF_Token}" ]]; then
+                        LOGE "API Token cannot be empty, script exiting..."
+                        exit 1
+                    fi
+
+                    LOGD "Please set the Account ID (optional, press enter to skip):"
+                    read -p "Input your account id here: " CF_Account_ID
+                fi
+
+                ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+                if [ $? -ne 0 ]; then
+                    LOGE "Default CA, Let's Encrypt failed, script exiting..."
+                    exit 1
+                fi
+
+                # Export only the chosen pair; a leftover of the other method in
+                # the environment would make acme.sh pick the wrong credentials.
+                if [[ "${cf_auth}" == "2" ]]; then
+                    unset CF_Token CF_Account_ID
+                    export CF_Key="${CF_GlobalKey}"
+                    export CF_Email="${CF_AccountEmail}"
+                else
+                    unset CF_Key CF_Email
+                    export CF_Token="${CF_Token}"
+                    if [[ -n "${CF_Account_ID}" ]]; then
+                        export CF_Account_ID="${CF_Account_ID}"
+                    else
+                        unset CF_Account_ID
+                    fi
+                fi
+
+                ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${CF_Domain}" $force_flag --log
+                if [ $? -ne 0 ]; then
+                    LOGE "Certificate issuance failed, script exiting..."
+                    exit 1
+                else
+                    LOGI "Certificate issued Successfully, Installing..."
+                fi
+
+                mkdir -p ${certPath}/${CF_Domain}
+                if [ $? -ne 0 ]; then
+                    LOGE "Failed to create directory: ${certPath}/${CF_Domain}"
+                    exit 1
+                fi
+
+                ~/.acme.sh/acme.sh --installcert -d "${CF_Domain}" \
+                    --fullchain-file ${certPath}/${CF_Domain}/fullchain.pem \
+                    --key-file ${certPath}/${CF_Domain}/privkey.pem
+
+                if [ $? -ne 0 ]; then
+                    LOGE "Certificate installation failed, script exiting..."
+                    exit 1
+                else
+                    LOGI "Certificate installed Successfully, Turning on automatic updates..."
+                fi
+
+                ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+                if [ $? -ne 0 ]; then
+                    LOGE "Auto update setup failed, script exiting..."
+                    exit 1
+                else
+                    LOGI "The certificate is installed and auto-renewal is turned on."
+                    ls -lah ${certPath}/${CF_Domain}
+                    secure_cert_files "${certPath}/${CF_Domain}"
+                fi
+            fi
+            show_menu
+            ;;
+        3)
+            echo "Exiting..."
+            show_menu
+            ;;
+        *)
+            echo "Invalid choice, please select again."
+            show_menu
+            ;;
     esac
-    show_menu
 }
 
 generate_self_signed_cert() {
