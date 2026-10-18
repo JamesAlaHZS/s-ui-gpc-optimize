@@ -39,6 +39,7 @@ flowchart LR
 ```bash
 systemctl status traffic-review-collector --no-pager
 journalctl -u traffic-review-collector -n 40 --no-pager
+tail -n 40 /var/lib/s-ui-traffic-review/collector.err
 ip -4 route show default
 ```
 
@@ -48,7 +49,7 @@ ip -4 route show default
 SUI_TRAFFIC_REVIEW_INTERFACE=ens4 bash /usr/local/s-ui/deploy/setup-traffic-review.sh
 ```
 
-这会开启连接字节记账并重启采集器及面板。已有连接可能需要重新连接后才有完整字节计数。无需在网页填写网卡名。
+这会开启连接字节记账并重启采集器。已有连接可能需要重新连接后才有完整字节计数。无需在网页填写网卡名。
 
 ## 3. 同步 GCP 账单
 

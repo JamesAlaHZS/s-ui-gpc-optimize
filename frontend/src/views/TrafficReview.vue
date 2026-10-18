@@ -366,6 +366,7 @@
             {{ tr('diagnosticCommand') }}
           </h2><pre class="command">sudo systemctl status traffic-review-collector --no-pager
 sudo journalctl -u traffic-review-collector -n 40 --no-pager
+sudo tail -n 40 /var/lib/s-ui-traffic-review/collector.err
 sudo bash /usr/local/s-ui/deploy/setup-traffic-review.sh</pre>
         </v-card>
         <source-card
