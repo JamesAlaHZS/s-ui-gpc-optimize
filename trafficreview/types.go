@@ -23,25 +23,31 @@ func DefaultRange(now time.Time) Range {
 
 type Summary struct {
 	Range
-	RuleVersion          string                    `json:"ruleVersion"`
-	RXBytes              int64                     `json:"rxBytes"`
-	TXBytes              int64                     `json:"txBytes"`
-	NICTotalBytes        int64                     `json:"nicTotalBytes"`
-	ProxyUploadBytes     int64                     `json:"proxyUploadBytes"`
-	ProxyDownloadBytes   int64                     `json:"proxyDownloadBytes"`
-	ProxyTotalBytes      int64                     `json:"proxyTotalBytes"`
-	NetworkEgressBytes   int64                     `json:"networkEgressBytes"`
-	NetworkIngressBytes  int64                     `json:"networkIngressBytes"`
-	NetworkTotalBytes    int64                     `json:"networkTotalBytes"`
-	ToRemoteEgressBytes  int64                     `json:"toRemoteEgressBytes"`
-	ToClientEgressBytes  int64                     `json:"toClientEgressBytes"`
-	LastSampleAt         int64                     `json:"lastSampleAt"`
-	SamplingSeconds      int                       `json:"samplingSeconds"`
-	Partial              bool                      `json:"partial"`
-	FlowBillingConfirmed bool                      `json:"flowBillingConfirmed"`
-	Disclaimer           string                    `json:"disclaimer"`
-	BillingOverview      *BillingOverview          `json:"billingOverview,omitempty"`
-	CarrierCorrelation   *CarrierCorrelationReport `json:"carrierCorrelation,omitempty"`
+	RuleVersion                 string                    `json:"ruleVersion"`
+	RXBytes                     int64                     `json:"rxBytes"`
+	TXBytes                     int64                     `json:"txBytes"`
+	NICTotalBytes               int64                     `json:"nicTotalBytes"`
+	ProxyUploadBytes            int64                     `json:"proxyUploadBytes"`
+	ProxyDownloadBytes          int64                     `json:"proxyDownloadBytes"`
+	ProxyTotalBytes             int64                     `json:"proxyTotalBytes"`
+	NetworkEgressBytes          int64                     `json:"networkEgressBytes"`
+	NetworkIngressBytes         int64                     `json:"networkIngressBytes"`
+	NetworkTotalBytes           int64                     `json:"networkTotalBytes"`
+	ToRemoteEgressBytes         int64                     `json:"toRemoteEgressBytes"`
+	ToClientEgressBytes         int64                     `json:"toClientEgressBytes"`
+	UnknownDirectionEgressBytes int64                     `json:"unknownDirectionEgressBytes"`
+	EgressDifferenceBytes       int64                     `json:"egressDifferenceBytes"`
+	NetworkSampleCount          int64                     `json:"networkSampleCount"`
+	ProxySampleCount            int64                     `json:"proxySampleCount"`
+	FirstSampleAt               int64                     `json:"firstSampleAt"`
+	LastSampleAt                int64                     `json:"lastSampleAt"`
+	SamplingSeconds             int                       `json:"samplingSeconds"`
+	Partial                     bool                      `json:"partial"`
+	DestinationDetailsPartial   bool                      `json:"destinationDetailsPartial"`
+	FlowBillingConfirmed        bool                      `json:"flowBillingConfirmed"`
+	Disclaimer                  string                    `json:"disclaimer"`
+	BillingOverview             *BillingOverview          `json:"billingOverview,omitempty"`
+	CarrierCorrelation          *CarrierCorrelationReport `json:"carrierCorrelation,omitempty"`
 }
 
 type SeriesPoint struct {
@@ -71,6 +77,8 @@ type Destination struct {
 	FeeStatus   string `json:"feeStatus"`
 	FeeBasis    string `json:"feeBasis"`
 	RuleVersion string `json:"ruleVersion"`
+	// TXKnown is collection metadata, not an inferred zero-byte reading.
+	TXKnown bool `json:"-"`
 }
 
 type ProxyRecord struct {

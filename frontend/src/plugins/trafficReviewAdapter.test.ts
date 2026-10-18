@@ -20,11 +20,23 @@ describe('traffic review response adapter', () => {
     expect(summary.proxyUploadBytes).toBeNull()
     expect(summary.networkEgressBytes).toBeNull()
     expect(summary.flowBillingConfirmed).toBe(false)
+    expect(summary.networkSampleCount).toBeNull()
+    expect(summary.proxySampleCount).toBeNull()
+    expect(summary.egressDifferenceBytes).toBeNull()
 
     const rows = adaptTrafficReviewData('destinations', [{ peer: 'example.net', outbound: 'direct' }]) as TrafficDestination[]
     expect(rows[0].feeStatus).toBe('unknown')
     expect(rows[0].confidence).toBe('unknown')
     expect(rows[0].txBytes).toBeNull()
+  })
+
+  it('preserves sample availability, unknown direction and a negative interface difference', () => {
+    const summary = adaptTrafficReviewData('summary', { networkSampleCount: 3, proxySampleCount: 0, firstSampleAt: 123, unknownDirectionEgressBytes: 12, egressDifferenceBytes: -2048 }) as TrafficSummary
+    expect(summary.networkSampleCount).toBe(3)
+    expect(summary.proxySampleCount).toBe(0)
+    expect(summary.firstSampleAt).toBe(123)
+    expect(summary.unknownDirectionEgressBytes).toBe(12)
+    expect(summary.egressDifferenceBytes).toBe(-2048)
   })
 
   it('does not upgrade an unrecognized billing scope to confirmation', () => {

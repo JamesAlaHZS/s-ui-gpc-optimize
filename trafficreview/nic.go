@@ -112,6 +112,10 @@ func (s *Store) RecordNIC(n NICSnapshot) error {
 	if _, e = tx.Exec(`INSERT INTO nic_minutes VALUES(?,?,?,?,?) ON CONFLICT(at) DO UPDATE SET rx=rx+excluded.rx,tx=tx+excluded.tx,elapsed=elapsed+excluded.elapsed,quality=quality|excluded.quality`, n.At/60*60, rx, txBytes, elapsed, quality); e != nil {
 		return e
 	}
+	if _, e = tx.Exec(`INSERT INTO nic_hours VALUES(?,?,?,?,?,?,?,1)
+ON CONFLICT(at) DO UPDATE SET rx=rx+excluded.rx,tx=tx+excluded.tx,elapsed=elapsed+excluded.elapsed,quality=quality|excluded.quality,first_at=MIN(first_at,excluded.first_at),last_at=MAX(last_at,excluded.last_at),sample_count=sample_count+1`, n.At/3600*3600, rx, txBytes, elapsed, quality, n.At, n.At); e != nil {
+		return e
+	}
 	if kind != "" {
 		if _, e = tx.Exec("INSERT INTO review_alerts(at,kind,message,rule_version) VALUES(?,?,?,?)", n.At, kind, message, s.rules.Version); e != nil {
 			return e

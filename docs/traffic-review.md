@@ -7,7 +7,7 @@
 实现分三层，各层数值**不可直接相加**。内核逐连接归因范围为 TCP/UDP；其他协议、未经过 conntrack 的流量及协议开销仍只进入网卡总量。UDP 关联可能复用多个目的地，因此代理 UDP 的初始域名只作上下文，业务置信度保留为未知：
 
 1. 面板 SessionTracker 读取活跃 TCP/UDP 会话的累计代理载荷字节，并在短连接关闭时保留最终计数。它按已提供或嗅探的域名标注业务，既不是网卡线速字节，也不能涵盖 VPS 上所有非代理进程。十秒批量写入独立 SQLite，不调用会清零的原 `GetStats`。
-2. 独立采集器读取指定公网接口的 RX/TX 内核累计计数，构成接口总量；另用单条固定 `conntrack -E -e NEW,DESTROY -o timestamp,extended,id` 事件流监听 IPv4/IPv6（事件模式不传 `-f`），并分别读取两族活跃快照。原始与回复元组、NAT 及流量方向用于区分 **VPS→网站** 与 **VPS→客户端** 两段；两段都可能形成 VPS 出站。方向无法确定时保留缺口，不猜测目的地或收费类别。内核未启用 `nf_conntrack_acct`、缺少 CLI/权限、UDP 关联丢失或事件缓冲溢出时，逐目的字节可能缺失；采集仍应保留接口总量和健康状态。
+2. 独立采集器读取指定公网接口的 RX/TX 内核累计计数，构成接口总量；另用单条固定 `conntrack -E -e NEW,DESTROY -o timestamp,extended,id` 事件流监听 IPv4/IPv6（事件模式不传 `-f`），并分别读取两族活跃快照。原始与回复元组、NAT 及本机地址用于区分 **主动连接远端** 与 **响应入站对端**；后者也包括 SSH、面板和扫描响应，不等于代理下载。环回及不匹配监控地址的其他接口连接正常排除；NEW 暂无字节计数不当作故障，目标连接后续快照或结束记录仍缺计数才提示缺口。无法确定方向时不猜测出站字节或收费类别。内核未启用 `nf_conntrack_acct`、缺少 CLI/权限、UDP 关联丢失或事件缓冲溢出时，逐目的字节可能缺失；采集仍应保留接口总量和健康状态。
 3. 本地 CSV 仅记录项目/洛杉矶账单日/SKU 的用量和精确十进制费用文本。即使与本地字节同日出现，也不自动将某条流确认或分摊到某个 SKU。
 
 ## 构建与本地试运行
@@ -34,7 +34,7 @@ go build -o traffic-review ./cmd/traffic-review
 
 采集器与面板须访问**同一个独立 SQLite 文件及其 WAL/SHM 同目录文件**。示例的 `UMask=0077` 使文件仅归属用户可读写；若面板按原有 root 身份运行，它可以读取。若面板改以非 root 运行，应使两进程采用相同 UID 并授予目录读写权限，不能只依赖同组权限。面板设置 `SUI_TRAFFIC_REVIEW_DB=/var/lib/s-ui-traffic-review/review.db` 后才启用该只读界面；可选 `SUI_TRAFFIC_REVIEW_RULES=/etc/s-ui/traffic-review-rules.json`。独立采集器使用同一规则文件时需显式传 `--rules /etc/s-ui/traffic-review-rules.json`。无规则时费用状态默认为 `unknown`；示例规则中的 `carrier_candidate` / `standard_candidate` 只是管理员假设，绝非账单确认。
 
-面板提供 Cookie 登录后的 `GET /api/traffic-review/{summary,series,destinations,alerts,health,billing}` 六个只读接口。API token 单独不能访问，亦无通过该界面写入规则或账单的端点。时间查询接受 `date=YYYY-MM-DD&timezone=America/Los_Angeles`，或 `from`/`to` Unix 秒；单次最多 31 日，列表 `limit` 为 1–500。账单日始终按洛杉矶日历处理，特别留意 PDT/PST 切换；不要把 UTC 或北京时间自然日当成同一个账单窗口。
+面板提供 Cookie 登录后的 `GET /api/traffic-review/{summary,series,destinations,alerts,health,billing}` 六个只读接口。API token 单独不能访问，亦无通过该界面写入规则或账单的端点。日期范围使用 `startDate=2024-01-01&endDate=2026-12-31&timezone=America/Los_Angeles`，包含结束当天，最大跨度为开始时刻到三年后同一日历时刻；兼容单日 `date` 和半开区间 `from`/`to` Unix 秒，三种形式不能混用。列表 `limit` 为 1–500。账单日始终按洛杉矶日历处理，特别留意 PDT/PST 切换；不要把 UTC 或北京时间自然日当成同一个账单窗口。
 
 ## 本地账单导入
 
@@ -90,6 +90,6 @@ date,project_id,sku_id,description,usage_gib,cost,currency
 
 首次采集只建立接口和已存在 conntrack 流的**基线**，不补算启用前的流量。采集器/网卡重启、接口更换或计数器回退会产生缺口；丢失的短流、UDP 关联和 ENOBUFS 事件不能靠下一张活跃快照完整恢复。`health`、`alerts`、`summary.partial` 与 `flowBillingConfirmed=false` 应随报表一起查看。代理载荷字节、内核流字节与网卡总量存在不同协议层开销、方向和进程范围；比较差异时不能强行将差额指派到域名。
 
-采集代码保留 7 天的十秒网卡样本和逐目的明细、90 天的分钟网卡总量与告警；连接水位保留 2 小时。逐目的记录最多 100,000 行，告警最多 10,000 条，超限会删最旧数据并报告缺口。SQLite `max_page_count=65536`：在常见 4 KiB 页下主库上限约 256 MiB；WAL/SHM、日志与未完成的检查点可能另占磁盘，`journal_size_limit` 不是瞬时磁盘硬上限。例子中的 `MemoryMax=128M` 是进程保护阈值，可能需根据实测调整，并不保证固定 CPU 或无丢样。
+采集代码保留 3 年的小时网卡与连接/代理总量汇总、7 天的十秒网卡样本和逐目的明细、90 天的分钟网卡总量与告警；连接水位保留 2 小时。升级仅一次性迁移仍存在的分钟历史，不能补回已经清理的数据。逐目的记录最多 100,000 行，告警最多 10,000 条，超限会删最旧数据并报告明细缺口；汇总不依赖剩余明细重算。没有观测的代理或连接数据不可显示为真实零值；网卡与内核出站差额保留正负号，不作为费用推算。SQLite `max_page_count=65536`：在常见 4 KiB 页下主库上限约 256 MiB；WAL/SHM、日志与未完成的检查点可能另占磁盘，`journal_size_limit` 不是瞬时磁盘硬上限。例子中的 `MemoryMax=128M` 是进程保护阈值，可能需根据实测调整，并不保证固定 CPU 或无丢样。
 
 上线前应核对面板仍可正常代理和读取原统计、数据库权限、网卡名、`conntrack` 权限与 `nf_conntrack_acct` 的当前值。如需开启内核记账，只能由管理员**先记录旧值并显式决定**，本程序和模板不会运行 `sysctl`、改防火墙或安装软件。部署后的 48–72 小时连续观察、异常/重启演练及与账单的对照**尚未完成**；因此目前不能宣称费用归因验证通过。

@@ -83,7 +83,12 @@ CREATE TABLE IF NOT EXISTS review_bills (date TEXT,project_id TEXT,sku_id TEXT,d
 CREATE TABLE IF NOT EXISTS review_billing_sync_runs (id INTEGER PRIMARY KEY AUTOINCREMENT,at INTEGER NOT NULL,month TEXT NOT NULL,mode TEXT NOT NULL,estimated_bytes INTEGER NOT NULL,billed_bytes INTEGER NOT NULL,dataset_storage_bytes INTEGER NOT NULL,existing_monthly_bytes INTEGER NOT NULL,rows_upserted INTEGER NOT NULL,rows_corrected INTEGER NOT NULL,max_export_time INTEGER NOT NULL,status TEXT NOT NULL,message TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS review_billing_sync_month ON review_billing_sync_runs(month,at);
 `, applicationID)
+	schema += historySchema
 	if _, err = db.Exec(schema); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec("ALTER TABLE traffic_minutes ADD COLUMN sample_count INTEGER NOT NULL DEFAULT 1"); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		db.Close()
 		return nil, err
 	}
@@ -97,6 +102,10 @@ CREATE INDEX IF NOT EXISTS review_billing_sync_month ON review_billing_sync_runs
 		"ALTER TABLE review_bills ADD COLUMN sync_source TEXT NOT NULL DEFAULT 'csv_manual'",
 	} {
 		_, _ = db.Exec(alter)
+	}
+	if err = s.migrateHistory(); err != nil {
+		db.Close()
+		return nil, err
 	}
 	return s, nil
 }
@@ -155,6 +164,9 @@ func (s *Store) Retain(now int64) error {
 		{"DELETE FROM nic_samples WHERE at<?", now - 7*86400},
 		{"DELETE FROM nic_minutes WHERE at<?", now - 90*86400},
 		{"DELETE FROM traffic_minutes WHERE at<?", now - 7*86400},
+		{"DELETE FROM nic_hours WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
+		{"DELETE FROM traffic_hours WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
+		{"DELETE FROM review_history_gaps WHERE at<?", time.Unix(now, 0).UTC().AddDate(-3, 0, 0).Unix() / 3600 * 3600},
 		{"DELETE FROM review_checkpoints WHERE seen<?", now - 7200},
 		{"DELETE FROM review_alerts WHERE at<?", now - 90*86400},
 		{"DELETE FROM review_billing_sync_runs WHERE at<?", now - 90*86400},
@@ -169,6 +181,13 @@ func (s *Store) Retain(now int64) error {
 		return err
 	}
 	if n > 100000 {
+		var detailBefore int64
+		if err = tx.QueryRow("SELECT MAX(at)+60 FROM (SELECT at FROM traffic_minutes ORDER BY at LIMIT ?)", n-100000).Scan(&detailBefore); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("INSERT INTO review_meta VALUES('destination_retained_from',?) ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT)", detailBefore); err != nil {
+			return err
+		}
 		if _, err = tx.Exec("DELETE FROM traffic_minutes WHERE rowid IN (SELECT rowid FROM traffic_minutes ORDER BY at LIMIT ?)", n-100000); err != nil {
 			return err
 		}
@@ -191,12 +210,12 @@ func addDestination(tx *sql.Tx, at int64, d Destination, version string) error {
 	if d.UpBytes < 0 || d.DownBytes < 0 || d.TXBytes < 0 || d.RXBytes < 0 {
 		return errors.New("negative traffic counter")
 	}
-	if d.UpBytes == 0 && d.DownBytes == 0 && d.TXBytes == 0 && d.RXBytes == 0 {
-		return nil
+	if err := addTrafficHour(tx, at, d); err != nil {
+		return err
 	}
-	_, err := tx.Exec(`INSERT INTO traffic_minutes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(at,layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version) DO UPDATE SET up=up+excluded.up,down=down+excluded.down,tx=tx+excluded.tx,rx=rx+excluded.rx`,
-		at/60*60, d.Layer, clip(d.Peer, 256), clip(d.Domain, 253), clip(d.User, 128), clip(d.Inbound, 128), clip(d.Outbound, 128), clip(d.Protocol, 16), d.Business, d.Confidence, d.Leg, d.FeeStatus, clip(d.FeeBasis, 600), version, d.UpBytes, d.DownBytes, d.TXBytes, d.RXBytes)
+	_, err := tx.Exec(`INSERT INTO traffic_minutes(at,layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version,up,down,tx,rx,sample_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(at,layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version) DO UPDATE SET up=up+excluded.up,down=down+excluded.down,tx=tx+excluded.tx,rx=rx+excluded.rx,sample_count=sample_count+excluded.sample_count`,
+		at/60*60, d.Layer, clip(d.Peer, 256), clip(d.Domain, 253), clip(d.User, 128), clip(d.Inbound, 128), clip(d.Outbound, 128), clip(d.Protocol, 16), d.Business, d.Confidence, d.Leg, d.FeeStatus, clip(d.FeeBasis, 600), version, d.UpBytes, d.DownBytes, d.TXBytes, d.RXBytes, trafficObservation(d))
 	return err
 }
 
@@ -246,19 +265,27 @@ func (s *Store) Summary(r Range) (Summary, error) {
 	_ = s.db.QueryRow("SELECT CAST(value AS INTEGER) FROM review_meta WHERE key='interval_seconds'").Scan(&v.SamplingSeconds)
 	var first sql.NullInt64
 	var quality int
-	err := s.db.QueryRow("SELECT COALESCE(SUM(rx),0),COALESCE(SUM(tx),0),COALESCE(MAX(quality),0),MIN(at),COALESCE(MAX(at),0) FROM nic_minutes WHERE at>=? AND at<?", r.From/60*60, r.To).Scan(&v.RXBytes, &v.TXBytes, &quality, &first, &v.LastSampleAt)
+	var elapsed int64
+	query, args := nicWindow(r)
+	err := s.db.QueryRow(query+"SELECT COALESCE(SUM(rx),0),COALESCE(SUM(tx),0),COALESCE(MAX(quality),0),MIN(first_at),COALESCE(MAX(last_at),0),COALESCE(SUM(elapsed),0) FROM nic_window", args...).Scan(&v.RXBytes, &v.TXBytes, &quality, &first, &v.LastSampleAt, &elapsed)
 	if err != nil {
 		return v, err
 	}
-	err = s.db.QueryRow("SELECT COALESCE(SUM(CASE WHEN layer='proxy' THEN up ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='proxy' THEN down ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN rx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' AND leg='to_remote' THEN tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' AND leg='to_client' THEN tx ELSE 0 END),0) FROM traffic_minutes WHERE at>=? AND at<?", r.From/60*60, r.To).Scan(&v.ProxyUploadBytes, &v.ProxyDownloadBytes, &v.NetworkEgressBytes, &v.NetworkIngressBytes, &v.ToRemoteEgressBytes, &v.ToClientEgressBytes)
+	if first.Valid {
+		v.FirstSampleAt = first.Int64
+	}
+	query, args = trafficWindow(r)
+	err = s.db.QueryRow(query+`SELECT COALESCE(SUM(CASE WHEN layer='proxy' THEN up ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='proxy' THEN down ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN rx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN remote_tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN client_tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN unknown_tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN sample_count ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='proxy' THEN sample_count ELSE 0 END),0) FROM traffic_window`, args...).Scan(&v.ProxyUploadBytes, &v.ProxyDownloadBytes, &v.NetworkEgressBytes, &v.NetworkIngressBytes, &v.ToRemoteEgressBytes, &v.ToClientEgressBytes, &v.UnknownDirectionEgressBytes, &v.NetworkSampleCount, &v.ProxySampleCount)
+	if err != nil {
+		return v, err
+	}
 	v.NICTotalBytes = v.RXBytes + v.TXBytes
 	v.ProxyTotalBytes = v.ProxyUploadBytes + v.ProxyDownloadBytes
 	v.NetworkTotalBytes = v.NetworkEgressBytes + v.NetworkIngressBytes
-	// Destination detail expires after seven days. It must never be displayed as
-	// complete history merely because the interface total is still retained.
-	v.Partial = quality != 0 || !first.Valid || first.Int64 > r.From+60 || r.From < time.Now().Add(-7*24*time.Hour).Unix() || v.LastSampleAt < r.To-120
+	v.EgressDifferenceBytes = v.TXBytes - v.NetworkEgressBytes
+	v.Partial = quality != 0 || !first.Valid || first.Int64 > r.From+60 || v.LastSampleAt < r.To-120 || elapsed < r.To-r.From-120
 	var gaps int
-	if e := s.db.QueryRow("SELECT COUNT(*) FROM review_alerts WHERE at>=? AND at<? AND kind LIKE '%gap%'", r.From, r.To).Scan(&gaps); e != nil {
+	if e := s.db.QueryRow("SELECT COUNT(*) FROM review_history_gaps WHERE at>=? AND at<?", r.From/3600*3600, r.To).Scan(&gaps); e != nil {
 		return v, e
 	}
 	var healthJSON string
@@ -267,39 +294,78 @@ func (s *Store) Summary(r Range) (Summary, error) {
 	} else if h, ok := decodeHealth(healthJSON).(ConntrackHealth); !ok || !h.Available || h.Degraded {
 		v.Partial = true
 	}
-	// Classification is minute-bucketed. A non-aligned query includes a
-	// partially intersecting bucket and must never claim exact coverage.
-	v.Partial = v.Partial || gaps > 0 || r.From%60 != 0 || r.To%60 != 0
-	var sampleAt sql.NullInt64
-	if e := s.db.QueryRow("SELECT MAX(at) FROM nic_samples WHERE at>=? AND at<?", r.From, r.To).Scan(&sampleAt); e == nil && sampleAt.Valid {
-		v.LastSampleAt = sampleAt.Int64
+	// The only sub-hour fragments come from minute data. If that detail has
+	// expired, do not include a whole hour outside the requested range.
+	now := time.Now()
+	v.DestinationDetailsPartial = r.From < now.Add(-7*24*time.Hour).Unix()
+	var detailsFrom int64
+	if e := s.db.QueryRow("SELECT CAST(value AS INTEGER) FROM review_meta WHERE key='destination_retained_from'").Scan(&detailsFrom); e == nil && r.From < detailsFrom {
+		v.DestinationDetailsPartial = true
 	}
-	if overview, e := s.BillingOverview(r, time.Now()); e == nil {
+	nicDetailFrom := now.Add(-90 * 24 * time.Hour).Unix()
+	trafficDetailFrom := now.Add(-7 * 24 * time.Hour).Unix()
+	if detailsFrom > trafficDetailFrom {
+		trafficDetailFrom = detailsFrom
+	}
+	oldNICBoundary := r.From%3600 != 0 && r.From < nicDetailFrom || r.To%3600 != 0 && r.To/3600*3600 < nicDetailFrom
+	oldTrafficBoundary := r.From%3600 != 0 && r.From < trafficDetailFrom || r.To%3600 != 0 && r.To/3600*3600 < trafficDetailFrom
+	v.Partial = v.Partial || gaps > 0 || r.From%60 != 0 || r.To%60 != 0 || oldNICBoundary || oldTrafficBoundary
+	var firstSample, lastSample sql.NullInt64
+	if e := s.db.QueryRow("SELECT MIN(at),MAX(at) FROM nic_samples WHERE at>=? AND at<?", r.From, r.To).Scan(&firstSample, &lastSample); e == nil && lastSample.Valid {
+		v.LastSampleAt = lastSample.Int64
+		if r.From/3600 == firstSample.Int64/3600 {
+			v.FirstSampleAt = firstSample.Int64
+		}
+	}
+	if overview, e := s.BillingOverview(r, now); e == nil {
 		v.BillingOverview = &overview
 	}
 	if corr, e := s.CarrierCorrelation(r); e == nil {
-		corr.Partial = v.Partial
+		corr.Partial = v.Partial || v.DestinationDetailsPartial
 		v.CarrierCorrelation = &corr
 	}
-	return v, err
+	return v, nil
 }
 
 func (s *Store) Series(r Range) ([]SeriesPoint, error) {
 	step := int64(10)
 	table := "nic_samples"
 	if r.To-r.From > 6*3600 {
-		step = 60
+		step, table = 60, "nic_minutes"
 	}
 	if r.To-r.From > 2*86400 {
 		step = 900
 	}
-	if r.From < time.Now().Add(-7*24*time.Hour).Unix() {
+	var query string
+	var args []any
+	if r.To-r.From > 90*86400 || r.From < time.Now().Add(-90*24*time.Hour).Unix() {
+		step = 3600
+		query, args = nicWindow(r)
+		table = "nic_window"
+	} else if r.From < time.Now().Add(-7*24*time.Hour).Unix() {
 		table = "nic_minutes"
 		if step < 60 {
 			step = 60
 		}
 	}
-	rows, err := s.db.Query("SELECT at/?*?,SUM(rx),SUM(tx),SUM(rx)*1.0/MAX(SUM(elapsed),1),SUM(tx)*1.0/MAX(SUM(elapsed),1),MAX(quality) FROM "+table+" WHERE at>=? AND at<? GROUP BY at/? ORDER BY at/? LIMIT 5000", step, step, r.From, r.To, step, step)
+	// Choose a bucket size that returns the entire range, at most 5,000
+	// buckets, rather than silently truncating the oldest 5,000 points.
+	if need := (r.To - r.From + 4998) / 4999; need > step {
+		step = (need + step - 1) / step * step
+	}
+	query += "SELECT at/?*?,SUM(rx),SUM(tx),SUM(rx)*1.0/MAX(SUM(elapsed),1),SUM(tx)*1.0/MAX(SUM(elapsed),1),MAX(quality) FROM " + table
+	args = append(args, step, step)
+	if table != "nic_window" {
+		query += " WHERE at>=? AND at<?"
+		from := r.From
+		if table == "nic_minutes" {
+			from = from / 60 * 60
+		}
+		args = append(args, from, r.To)
+	}
+	query += " GROUP BY at/? ORDER BY at/?"
+	args = append(args, step, step)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +380,9 @@ func (s *Store) Series(r Range) ([]SeriesPoint, error) {
 		p.Quality = "ok"
 		if q != 0 {
 			p.Quality = "partial"
+		}
+		if len(out) > 0 && p.Time-out[len(out)-1].Time > step {
+			out = append(out, SeriesPoint{Time: out[len(out)-1].Time + step, Quality: "partial"})
 		}
 		out = append(out, p)
 	}
