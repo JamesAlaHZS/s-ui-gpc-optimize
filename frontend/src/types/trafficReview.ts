@@ -9,6 +9,122 @@ export interface TrafficReviewQuery {
   timezone: 'America/Los_Angeles' | 'Asia/Shanghai' | 'UTC'
 }
 
+export interface TrafficSKUBillingBucket {
+  skuID: string
+  description: string
+  category: string
+  handling: string
+  countsTowardStandard200GiB: boolean
+  usageGiB: string | null
+  grossCost: string | null
+  credits: string | null
+  netCost: string | null
+  currency: string
+  rowCount: number
+}
+
+export interface TrafficStandardTierReference {
+  referenceLimitGiB: string | null
+  targetVMDescription: string
+  targetVMEgressSKU: string
+  targetVMUsedGiB: string | null
+  targetVMRemainingRefGiB: string | null
+  excludedTargetSKUsGiB: string | null
+  quotaScope: string
+  measuredScope: string
+  accountWideComplete: boolean
+  note: string
+}
+
+export interface TrafficBillingTotals {
+  targetTotalUsageGiB: string | null
+  standardFreeTierUsageGiB: string | null
+  nonStandardUsageGiB: string | null
+  carrierPeeringUsageGiB: string | null
+  internalReferenceUsageGiB: string | null
+  targetGrossCost: string | null
+  targetCredits: string | null
+  targetNetCost: string | null
+  allImportedUsageGiB: string | null
+  allImportedNetCost: string | null
+  currency: string
+  estimationNote: string
+}
+
+export interface TrafficBillingSyncStatus {
+  enabled: boolean
+  mode: string
+  intervalHours: number
+  lastSyncAt: number | null
+  lastExportTime: number | null
+  lastStatus: string
+  dataPending: boolean
+  lagNotice: string
+  maxBytesPerQuery: number | null
+  maxMonthlyBytes: number | null
+  monthlyScannedBytes: number | null
+  estimatedMonthlyUSD: string | null
+  monthlyBudgetLimitUSD: string | null
+  budgetPaused: boolean
+}
+
+export interface TrafficBillingOverview {
+  targetSKUs: TrafficSKUBillingBucket[]
+  totals: TrafficBillingTotals
+  standardTierReference: TrafficStandardTierReference
+  carrierPeeringActual: TrafficSKUBillingBucket | null
+  otherSKUsCount: number
+  syncStatus: TrafficBillingSyncStatus
+  accountingNote: string
+}
+
+export interface TrafficCarrierCandidate {
+  destination: string
+  peer: string
+  domain: string
+  user: string
+  inbound: string
+  outbound: string
+  protocol: string
+  layer: string
+  leg: 'to_remote' | 'to_client' | 'unknown'
+  business: string
+  egressBytes: number | null
+  ingressBytes: number | null
+  egressGiB: string | null
+  windowSharePercent: string | null
+  correlationLevel: string
+  confidence: TrafficConfidence
+  evidenceBasis: string
+  collectionGap: string
+  suggestedOutboundTag: string
+  flowBillingConfirmed: boolean
+}
+
+export interface TrafficRelaySuggestion {
+  status: string
+  configured: boolean
+  outboundTag: string
+  domains: string[]
+  ipCIDRs: string[]
+  singBoxRule: Record<string, unknown> | null
+  manualOnly: boolean
+  warnings: string[]
+}
+
+export interface TrafficCarrierCorrelation {
+  billedCarrierPeeringGiB: string | null
+  billedCarrierPeeringCost: string | null
+  billedCurrency: string
+  localProxyCandidateGiB: string | null
+  localNetworkCandidateGiB: string | null
+  candidates: TrafficCarrierCandidate[]
+  relaySuggestion: TrafficRelaySuggestion
+  partial: boolean
+  flowBillingConfirmed: boolean
+  boundaryNote: string
+}
+
 export interface TrafficSummary {
   from: number
   to: number
@@ -16,15 +132,20 @@ export interface TrafficSummary {
   ruleVersion: string
   rxBytes: number | null
   txBytes: number | null
+  nicTotalBytes: number | null
   proxyUploadBytes: number | null
   proxyDownloadBytes: number | null
+  proxyTotalBytes: number | null
   networkEgressBytes: number | null
   networkIngressBytes: number | null
+  networkTotalBytes: number | null
   lastSampleAt: number | null
   samplingSeconds: number
   partial: boolean
   flowBillingConfirmed: boolean
   disclaimer: string
+  billingOverview: TrafficBillingOverview | null
+  carrierCorrelation: TrafficCarrierCorrelation | null
 }
 
 export interface TrafficSeriesPoint {
@@ -96,6 +217,15 @@ export interface TrafficBillingRecord {
   currency: string
   sourceSHA256: string
   scope: 'project_day_sku' | 'unknown'
+  category?: string
+  accountingTreatment?: string
+  countsTowardStandard200GiB?: boolean
+  invoiceMonth?: string
+  credits?: string | null
+  netCost?: string | null
+  exportTime?: number | null
+  syncedAt?: number | null
+  syncSource?: string
 }
 
 export interface TrafficReviewResponse<T = unknown> {

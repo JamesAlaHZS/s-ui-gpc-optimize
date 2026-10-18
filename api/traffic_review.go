@@ -29,7 +29,30 @@ func (a *APIHandler) trafficReview(c *gin.Context) {
 		case "health":
 			obj = trafficreview.Health{Status: "disabled", SamplingSeconds: 10, Conntrack: map[string]any{"available": false, "degraded": true, "lastError": "Local collector not enabled"}}
 		case "summary":
-			obj = trafficreview.Summary{Range: r, RuleVersion: trafficreview.RuleVersion, SamplingSeconds: 10, Partial: true, Disclaimer: trafficreview.Disclaimer}
+			overview := trafficreview.SummarizeBills(nil, trafficreview.BillingSyncStatus{
+				Mode:                  "manual_csv_fallback",
+				IntervalHours:         trafficreview.DefaultSyncIntervalHours,
+				DataPending:           true,
+				LagNotice:             trafficreview.BillingLagNotice,
+				MaxBytesPerQuery:      trafficreview.DefaultMaxBytesPerQuery,
+				MaxMonthlyBytes:       trafficreview.DefaultMaxMonthlyBytes,
+				EstimatedMonthlyUSD:   "0",
+				MonthlyBudgetLimitUSD: "0.05",
+			})
+			obj = trafficreview.Summary{Range: r, RuleVersion: trafficreview.RuleVersion, SamplingSeconds: 10, Partial: true, Disclaimer: trafficreview.Disclaimer, BillingOverview: &overview}
+		case "billing-overview":
+			obj = trafficreview.SummarizeBills(nil, trafficreview.BillingSyncStatus{
+				Mode:                  "manual_csv_fallback",
+				IntervalHours:         trafficreview.DefaultSyncIntervalHours,
+				DataPending:           true,
+				LagNotice:             trafficreview.BillingLagNotice,
+				MaxBytesPerQuery:      trafficreview.DefaultMaxBytesPerQuery,
+				MaxMonthlyBytes:       trafficreview.DefaultMaxMonthlyBytes,
+				EstimatedMonthlyUSD:   "0",
+				MonthlyBudgetLimitUSD: "0.05",
+			})
+		case "candidates":
+			obj = trafficreview.CarrierCorrelationReport{Range: r, Candidates: []trafficreview.CarrierPeeringCandidate{}, RelaySuggestion: trafficreview.RelayRouteSuggestion{Status: "pending_configuration", Configured: false, OutboundTag: trafficreview.DefaultRelayOutboundTag, Domains: []string{}, IPCIDRs: []string{}, ManualOnly: true}, Partial: true, FlowBillingConfirmed: false, BoundaryNote: trafficreview.CarrierBoundaryNote}
 		case "series", "destinations", "alerts", "billing":
 			obj = []any{}
 		default:
@@ -50,6 +73,10 @@ func (a *APIHandler) trafficReview(c *gin.Context) {
 			obj, err = s.Health(time.Now().Unix())
 		case "billing":
 			obj, err = s.Bills(r)
+		case "billing-overview":
+			obj, err = s.BillingOverview(r, time.Now())
+		case "candidates":
+			obj, err = s.CarrierCorrelation(r)
 		default:
 			c.Status(http.StatusNotFound)
 			return

@@ -118,11 +118,20 @@
                   <v-col cols="6">
                     {{ t('trafficReview.proxyDownload') }}<strong class="d-block">{{ formatBytes(summary.proxyDownloadBytes) }}</strong>
                   </v-col>
+                  <v-col cols="12">
+                    {{ t('trafficReview.proxyTotal') }}<strong class="d-block">{{ formatBytes(summary.proxyTotalBytes ?? ((summary.proxyUploadBytes ?? 0) + (summary.proxyDownloadBytes ?? 0))) }}</strong>
+                  </v-col>
                   <v-col cols="6">
                     {{ t('trafficReview.networkEgress') }}<strong class="d-block">{{ formatBytes(summary.networkEgressBytes) }}</strong>
                   </v-col>
                   <v-col cols="6">
                     {{ t('trafficReview.networkIngress') }}<strong class="d-block">{{ formatBytes(summary.networkIngressBytes) }}</strong>
+                  </v-col>
+                  <v-col cols="6">
+                    {{ t('trafficReview.networkTotal') }}<strong class="d-block">{{ formatBytes(summary.networkTotalBytes ?? ((summary.networkEgressBytes ?? 0) + (summary.networkIngressBytes ?? 0))) }}</strong>
+                  </v-col>
+                  <v-col cols="6">
+                    {{ t('trafficReview.nicTotal') }}<strong class="d-block">{{ formatBytes(summary.nicTotalBytes ?? ((summary.rxBytes ?? 0) + (summary.txBytes ?? 0))) }}</strong>
                   </v-col>
                 </v-row>
                 <p class="text-body-2 mt-2">
@@ -233,6 +242,206 @@
         >
           {{ t('trafficReview.costBoundary') }}
         </v-alert>
+        <v-alert
+          v-if="summary?.billingOverview?.syncStatus?.dataPending"
+          type="info"
+          variant="tonal"
+          class="mb-4"
+        >
+          {{ t('trafficReview.dataPendingWarning') }}
+        </v-alert>
+        <v-alert
+          v-if="summary?.billingOverview?.syncStatus?.budgetPaused"
+          type="error"
+          variant="tonal"
+          class="mb-4"
+        >
+          {{ t('trafficReview.budgetPausedWarning') }}
+        </v-alert>
+
+        <v-card
+          v-if="summary?.billingOverview"
+          variant="outlined"
+          class="mb-4 pa-4"
+        >
+          <div class="text-subtitle-1 font-weight-medium mb-2">
+            {{ t('trafficReview.standardQuotaTitle') }}
+          </div>
+          <v-row class="mb-2">
+            <v-col
+              cols="12"
+              sm="6"
+              md="4"
+            >
+              <span class="text-caption text-medium-emphasis">{{ t('trafficReview.targetTotalUsage') }}</span>
+              <strong class="d-block">{{ summary.billingOverview.totals.targetTotalUsageGiB ?? '0' }} GiB</strong>
+            </v-col>
+            <v-col
+              cols="12"
+              sm="6"
+              md="4"
+            >
+              <span class="text-caption text-medium-emphasis">{{ t('trafficReview.targetTotalNetCost') }}</span>
+              <strong class="d-block">{{ summary.billingOverview.totals.currency || 'USD' }} {{ summary.billingOverview.totals.targetNetCost ?? '—' }}</strong>
+            </v-col>
+            <v-col
+              cols="12"
+              sm="6"
+              md="4"
+            >
+              <span class="text-caption text-medium-emphasis">{{ t('trafficReview.targetVMStandardUsed') }}</span>
+              <strong class="d-block">{{ summary.billingOverview.standardTierReference.targetVMUsedGiB ?? '0' }} / {{ summary.billingOverview.standardTierReference.referenceLimitGiB ?? '200' }} GiB</strong>
+            </v-col>
+            <v-col
+              cols="12"
+              sm="6"
+              md="4"
+            >
+              <span class="text-caption text-medium-emphasis">{{ t('trafficReview.targetVMRemainingRef') }}</span>
+              <strong class="d-block">{{ summary.billingOverview.standardTierReference.targetVMRemainingRefGiB ?? '200' }} GiB</strong>
+            </v-col>
+            <v-col
+              cols="12"
+              sm="6"
+              md="4"
+            >
+              <span class="text-caption text-medium-emphasis">{{ t('trafficReview.excludedTargetSKUs') }}</span>
+              <strong class="d-block">{{ summary.billingOverview.totals.nonStandardUsageGiB ?? '0' }} GiB ({{ t('trafficReview.internalReferenceUsed') }}: {{ summary.billingOverview.totals.internalReferenceUsageGiB ?? '0' }} GiB)</strong>
+            </v-col>
+            <v-col
+              cols="12"
+              sm="6"
+              md="4"
+            >
+              <span class="text-caption text-medium-emphasis">{{ t('trafficReview.carrierActualBilled') }}</span>
+              <strong class="d-block">{{ summary.billingOverview.carrierPeeringActual?.usageGiB ?? '0' }} GiB / {{ summary.billingOverview.carrierPeeringActual?.currency || 'USD' }} {{ summary.billingOverview.carrierPeeringActual?.netCost ?? '—' }}</strong>
+            </v-col>
+          </v-row>
+          <p class="text-body-2 text-medium-emphasis mb-3">
+            {{ summary.billingOverview.standardTierReference.note }}
+          </p>
+
+          <div class="text-subtitle-2 font-weight-medium mb-2">
+            {{ t('trafficReview.fiveSKUTitle') }}
+          </div>
+          <v-table
+            v-if="summary.billingOverview.targetSKUs.length"
+            density="compact"
+            class="mb-3"
+          >
+            <thead>
+              <tr>
+                <th>{{ t('trafficReview.billingDescriptionCol') }}</th>
+                <th>{{ t('trafficReview.usage') }}</th>
+                <th>{{ t('trafficReview.cost') }}</th>
+                <th>{{ t('trafficReview.treatment') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="sku in summary.billingOverview.targetSKUs"
+                :key="`${sku.category}-${sku.description}`"
+              >
+                <td>
+                  <strong>{{ sku.description }}</strong>
+                  <small
+                    v-if="sku.skuID"
+                    class="d-block text-medium-emphasis"
+                  >SKU: {{ sku.skuID }}</small>
+                </td>
+                <td>{{ sku.usageGiB ?? '0' }} GiB</td>
+                <td>{{ sku.currency || 'USD' }} {{ sku.netCost ?? sku.grossCost ?? '—' }}</td>
+                <td>{{ skuHandlingLabel(sku.handling) }}</td>
+              </tr>
+              <tr class="font-weight-bold">
+                <td>{{ t('trafficReview.totalRowLabel') }}</td>
+                <td>{{ summary.billingOverview.totals.targetTotalUsageGiB ?? '0' }} GiB</td>
+                <td>{{ summary.billingOverview.totals.currency || 'USD' }} {{ summary.billingOverview.totals.targetNetCost ?? '—' }}</td>
+                <td>{{ t('trafficReview.totalRowTreatment') }}</td>
+              </tr>
+            </tbody>
+          </v-table>
+
+          <div class="text-subtitle-2 font-weight-medium mb-1">
+            {{ t('trafficReview.syncStatusTitle') }}
+          </div>
+          <p class="text-body-2 text-medium-emphasis mb-0">
+            {{ t('trafficReview.syncMode') }}: {{ summary.billingOverview.syncStatus.mode || 'manual_csv_fallback' }} ({{ summary.billingOverview.syncStatus.intervalHours }}h) ·
+            {{ t('trafficReview.lastSync') }}: {{ formatTime(summary.billingOverview.syncStatus.lastSyncAt) }} ·
+            {{ t('trafficReview.lastExport') }}: {{ formatTime(summary.billingOverview.syncStatus.lastExportTime) }} ·
+            {{ t('trafficReview.budgetScan') }}: {{ formatBytes(summary.billingOverview.syncStatus.monthlyScannedBytes) }} / {{ formatBytes(summary.billingOverview.syncStatus.maxMonthlyBytes) }} ·
+            {{ t('trafficReview.estimatedCost') }}: ${{ summary.billingOverview.syncStatus.estimatedMonthlyUSD ?? '0' }} / ${{ summary.billingOverview.syncStatus.monthlyBudgetLimitUSD ?? '0.05' }}
+          </p>
+        </v-card>
+
+        <v-card
+          v-if="summary?.carrierCorrelation"
+          variant="outlined"
+          class="mb-4 pa-4"
+        >
+          <div class="text-subtitle-1 font-weight-medium mb-1">
+            {{ t('trafficReview.carrierCandidatesTitle') }}
+          </div>
+          <p class="text-body-2 text-medium-emphasis mb-1">
+            {{ t('trafficReview.relayStatusLabel') }}:
+            <strong>{{ summary.carrierCorrelation.relaySuggestion.configured ? t('trafficReview.relayConfiguredPreview') : t('trafficReview.relayPendingConfig') }}</strong>
+          </p>
+          <p class="text-body-2 text-medium-emphasis mb-2">
+            {{ t('trafficReview.sideBySideComparison') }}:
+            Network Data Transfer Out via Carrier Peering Network - Americas Based = {{ summary.carrierCorrelation.billedCarrierPeeringGiB ?? '0' }} GiB ({{ summary.carrierCorrelation.billedCurrency || 'USD' }} {{ summary.carrierCorrelation.billedCarrierPeeringCost ?? '—' }}) ·
+            Proxy = {{ summary.carrierCorrelation.localProxyCandidateGiB ?? '0' }} GiB ·
+            Network = {{ summary.carrierCorrelation.localNetworkCandidateGiB ?? '0' }} GiB ·
+            flowBillingConfirmed = false
+          </p>
+          <v-table
+            v-if="summary.carrierCorrelation.candidates.length"
+            density="compact"
+            class="mb-2"
+          >
+            <thead>
+              <tr>
+                <th>{{ t('trafficReview.layer') }}</th>
+                <th>{{ t('trafficReview.leg') }}</th>
+                <th>{{ t('trafficReview.destination') }}</th>
+                <th>{{ t('trafficReview.volume') }}</th>
+                <th>{{ t('trafficReview.confidence') }}</th>
+                <th>{{ t('trafficReview.source') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(cand, cIdx) in summary.carrierCorrelation.candidates.slice(0, 10)"
+                :key="`${cand.layer}-${cand.destination}-${cIdx}`"
+              >
+                <td>{{ cand.layer }}</td>
+                <td>{{ legLabel(cand.leg) }}</td>
+                <td>
+                  {{ cand.destination }}
+                  <small
+                    v-if="cand.user || cand.outbound"
+                    class="d-block text-medium-emphasis"
+                  >{{ cand.user }} {{ cand.outbound }} → {{ cand.suggestedOutboundTag }}</small>
+                </td>
+                <td>{{ cand.egressGiB ?? '0' }} GiB ({{ cand.windowSharePercent ?? '0' }}%)</td>
+                <td>{{ cand.confidence }} ({{ cand.correlationLevel }})</td>
+                <td>
+                  <small class="d-block">{{ cand.evidenceBasis }}</small>
+                  <small class="d-block text-medium-emphasis">{{ cand.collectionGap }}</small>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+          <div
+            v-if="summary.carrierCorrelation.relaySuggestion.singBoxRule"
+            class="mt-2"
+          >
+            <div class="text-caption font-weight-medium mb-1">
+              {{ t('trafficReview.relayRulePreview') }}
+            </div>
+            <pre class="text-caption pa-2 bg-surface-light rounded overflow-x-auto">{{ formatRuleJSON(summary.carrierCorrelation.relaySuggestion.singBoxRule) }}</pre>
+          </div>
+        </v-card>
+
         <source-card
           endpoint="billing"
           :state="states.billing"
@@ -241,13 +450,21 @@
             v-if="billing?.length"
             density="compact"
           >
-            <thead><tr><th>{{ t('trafficReview.date') }}</th><th>{{ t('trafficReview.project') }}</th><th>SKU</th><th>{{ t('trafficReview.usage') }}</th><th>{{ t('trafficReview.cost') }}</th><th>{{ t('trafficReview.source') }}</th></tr></thead>
+            <thead><tr><th>{{ t('trafficReview.date') }}</th><th>{{ t('trafficReview.project') }}</th><th>{{ t('trafficReview.billingDescriptionCol') }}</th><th>{{ t('trafficReview.usage') }}</th><th>{{ t('trafficReview.cost') }}</th><th>{{ t('trafficReview.source') }}</th></tr></thead>
             <tbody>
               <tr
                 v-for="(item, index) in billing"
                 :key="`${item.date}-${item.projectID}-${item.skuID}-${index}`"
               >
-                <td>{{ item.date || '—' }}</td><td>{{ item.projectID || '—' }}</td><td>{{ item.skuID || '—' }}<small class="d-block">{{ item.description }}</small></td>
+                <td>{{ item.date || '—' }}</td>
+                <td>{{ item.projectID || '—' }}</td>
+                <td>
+                  <strong>{{ item.description || item.skuID || '—' }}</strong>
+                  <small
+                    v-if="item.skuID"
+                    class="d-block text-medium-emphasis"
+                  >SKU: {{ item.skuID }}</small>
+                </td>
                 <td>{{ item.usageGiB == null ? '—' : `${item.usageGiB} GiB` }}</td>
                 <td>{{ item.cost == null ? '—' : `${item.currency} ${item.cost}` }}</td>
                 <td>
@@ -360,6 +577,14 @@ function formatTime(value: number | null): string {
 }
 function feeLabel(value: FeeStatus): string { return t(`trafficReview.fees.${value}`) }
 function legLabel(value: Destination['leg']): string { return t(`trafficReview.legs.${value}`) }
+function skuHandlingLabel(value: string): string {
+  const key = `trafficReview.skuHandling.${value}`
+  const res = t(key)
+  return res === key ? value : res
+}
+function formatRuleJSON(value: Record<string, unknown> | null): string {
+  return value ? JSON.stringify(value, null, 2) : ''
+}
 
 async function refresh() {
   if (refreshing.value || poller.isLoading()) return

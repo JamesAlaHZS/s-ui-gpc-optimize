@@ -2,7 +2,20 @@
 
 ## 范围与结论
 
-已实现原生 S-UI 菜单、Cookie 鉴权只读 API、独立本地 SQLite、接口/连接/代理载荷三层采集、候选规则版本和人工账单导入。没有调用 Google 监控或计费 API。**可以从启用时起积累流量证据并记录人工导入的 SKU 费用，不能仅靠 VPS 证明哪条连接实际被 Google 收费。**
+已实现原生 S-UI 菜单、Cookie 鉴权只读 API、独立本地 SQLite、接口/连接/代理载荷三层采集、候选规则版本、人工账单导入及可选 BigQuery Standard export 同步。未调用 Google 监控或 Cloud Billing API；可选同步调用 BigQuery API。**可以从启用时起积累流量证据并记录 SKU 费用，不能仅靠 VPS 证明哪条连接实际被 Google 收费。**
+
+## 本次独立复核与修复
+
+此前 VPS / 浏览器验证来自交接记录，本次没有重新连接生产 VPS。此次重新执行 Linux test profile 全套 Go 测试、go vet、受影响包竞态检查，以及前端 139 项测试、lint、类型检查、生产构建和 Linux 二进制构建。新增回归覆盖：
+
+- 太平洋自然日与夏令时边界，避免滚动窗口用部分日覆盖完整日汇总。
+- BigQuery 未完成查询等待、结果分页和完整行数校验，分页失败不导入部分日数据。
+- 查询预算跨 SQLite 实例串行预留；超时、解析失败和崩溃不会释放可能已产生的查询费用。
+- 混合币种仅汇总用量，金额返回不可用；原币种仍保存在原始账单。
+- 汇总绕过明细列表 500 行上限；200 GiB 参考采用已导入的太平洋自然月项目用量，不标作单台 VM 的实际剩余额度。
+- Google 带负用量的更正记录可以参与日汇总；缺少任一对比窗口的账单时拒绝宣称中转节省费用。
+- 中转预览移除无效 `status` 路由字段，并由当前 sing-box 规则解析器实际验证。
+- 采集器使用 systemd 就绪通知；面板的启动依赖等待独立库和 WAL 打开，减少 root 面板先创建监控用户无权访问的 WAL 的启动竞争。
 
 Standard 免费额度不覆盖所有 SKU；Carrier Peering 名称也可能来自 CDN Interconnect。仅按网站、ASN、出口为 direct 或“没有手工中转”进行收费分类不充分。规则命中始终是候选；CSV 保留项目/账单日/SKU 范围和精确十进制文本，不按域名分摊费用。参见[部署及证据边界](traffic-review.md)。
 
@@ -21,6 +34,8 @@ Standard 免费额度不覆盖所有 SKU；Carrier Peering 名称也可能来自
 | 采集健康 | 最终运行事件监听 1 条，eventRestarts/eventGaps/ENOBUFS/parseErrors 均为 0，degraded=false。修复前的历史缺口仍在审计中，不能当成完整历史 |
 | 接口安全 | 未登录（含非 XHR）401；仅 API token 无效；POST 新接口 404；非法查询 400；六项 GET 正常 |
 | 账单 | 仅使用明显标注虚构项目的测试 CSV；`0.306` 原精度返回；相同文件再导入新增 0 行；冲突批次回滚的单元测试通过 |
+| 五项账单描述分项与汇总总额 + 预算保护 | 以可读账单描述为主标识，既提供五项汇总总额（样例 `79.35 GiB` / `$0.82`）供整体估算，又将 `Network Standard Data Transfer Out to Internet from Oregon`（`69.03 GiB`）单独对照 200 GiB 参考线；12h 幂等同步、迟到更正、ADC 模拟查询与 64 MiB / <$0.05 月度熔断测试通过 |
+| Carrier Peering 候选与中转待配置槽位 | 默认保持 `pending_configuration`（`<PENDING_RELAY_OUTBOUND>` 待配置状态），支持后续指定 `--relay-outbound`；远端目标候选生成、`to_client` 客户端 IP 排除保护、中转前后账单对比与 `flowBillingConfirmed=false` 回归通过 |
 | 数据隔离 | 非审查数据库拒绝打开且不被修改；SQLite 完整性检查通过；原面板数据库未增加审查表 |
 | 测试恢复 | 隔离服务停止、12095/12096 本机测试端口关闭；内核记账恢复原值 0、事件设置原样；SSH 正常。保留隔离目录及本次安装的 conntrack CLI，没有新增常驻 daemon 或持久 sysctl |
 

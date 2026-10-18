@@ -1,6 +1,6 @@
 # 本地流量复核：部署与证据边界
 
-此功能用于**从启用时起**观察 VPS 的接口字节量、代理会话和内核连接，并单独保存人工导入的项目/日期/SKU 账单。它不改变代理路由、防火墙或现有面板统计，也不从 Google 拉取账单。旧 sing-box 日志只有连接记录时，不能追溯每个域名的字节数；账单金额也不能凭日志条数精确分摊给 Telegram 或任一域名。业务域名、IP 注册归属和 `direct` 出站均不能证明 Google 将对应字节计入 Standard 或 Carrier Peering SKU。
+此功能用于**从启用时起**观察 VPS 的接口字节量、代理会话和内核连接，并单独保存项目/日期/SKU 账单，支持人工 CSV 和可选 BigQuery Standard export 同步。它不改变代理路由、防火墙或现有面板统计。旧 sing-box 日志只有连接记录时，不能追溯每个域名的字节数；账单金额也不能凭日志条数精确分摊给 Telegram 或任一域名。业务域名、IP 注册归属和 `direct` 出站均不能证明 Google 将对应字节计入 Standard 或 Carrier Peering SKU。完整架构图、逐步部署命令和回滚见 [VPS 部署指南](vps-deployment.zh-CN.md)。
 
 费用解释尤其要区分 SKU：Standard 的 200 GiB 免费额度不能当成所有网络出站的统一抵扣。官方说明 CDN Interconnect 出站也可能显示为 `Network Data Transfer Out via Carrier Peering Network`，因此仅凭该 SKU 名称不能反推用户手工配置了中转，亦不能确定具体域名。参见 [VPC 网络价格](https://cloud.google.com/vpc/network-pricing)、[CDN Interconnect 价格](https://cloud.google.com/network-connectivity/pricing#cdn-interconnect-pricing)；账单按 [太平洋时区并遵循夏令时](https://docs.cloud.google.com/billing/docs/how-to/reports)划日。价格说明于 2026-10-18 核查，程序不固化费率或免费额度推断。
 
@@ -51,6 +51,40 @@ date,project_id,sku_id,description,usage_gib,cost,currency
 ```
 
 文件最多 4 MiB、最多 10,000 行。数据键为日期、项目、SKU、币种；完全相同的再导入不会产生新账单行，冲突行会使**整批事务拒绝**，不会覆盖已有记录。不同币种分别保存，不混算。导入审计记录本地源文件的 SHA-256、插入行数和 `project_day_sku` 范围。SHA 只能证明导入文件的身份，**不能自动验证其来自真实 Google 账单**；人工核验来源和口径仍必需，更不能因此确认每流费用。
+
+## 五项网络账单描述的分项统计、汇总总额与自动账单同步（Standard Usage Cost Export）
+
+根据 [Google Cloud VPC 网络定价](https://cloud.google.com/vpc/network-pricing)、[Standard Egress](https://cloud.google.com/skus/sku-groups/network-standard-egress)、[Inter-zone](https://cloud.google.com/skus/sku-groups/network-egress-gce)、[Inter-region](https://cloud.google.com/skus/sku-groups/network-egress-inter-region-gce) 与 [Carrier Peering](https://cloud.google.com/skus/sku-groups/interconnect)，分类、展示和同步以具备可读意义的**账单项目描述（`description`）**为主标识（`SKU ID` 仅作为次要参考元数据保留）。系统同时提供**五项汇总总额（`targetTotalUsageGiB` / `targetNetCost`）**与**逐项分类明细**——汇总总额方便估算整体网络流量规模（如样例合计 `79.35 GiB` / `$0.82`），而计算 Standard Tier 200 GiB 免费额度时只抵扣第一项 Standard Internet 出站：
+
+| 账单项目描述（主标识） | 参考 SKU ID | 分类与计费处理方式 |
+| --- | --- | --- |
+| `Network Standard Data Transfer Out to Internet from Oregon` | `4986-FDE4-A69A` | 计入目标 Oregon VM 的 Standard Tier Internet egress 统计（可对照 200 GiB 参考线，但标注“仅目标 VM”，不代表整个 Billing Account 跨项目/跨区域全局已用量） |
+| `Network Inter Zone Data Transfer Out` | `DE9E-AFBC-A15A` | 内部跨 Zone 流量单独备查，计入五项总流量估算，**不计入** Standard Tier 200 GiB 免费额度 |
+| `Network Inter Region Data Transfer Out from Americas to Las Vegas` | `ACC0-9F23-6029` | 跨 Region 流量单独备查，计入五项总流量估算，**不计入** Standard Tier 200 GiB 免费额度 |
+| `Network Inter Region Data Transfer Out from Americas to Virginia` | `C863-37DA-506E` | 跨 Region 流量单独备查，计入五项总流量估算，**不计入** Standard Tier 200 GiB 免费额度 |
+| `Network Data Transfer Out via Carrier Peering Network - Americas Based` | `984A-1F27-2D1F` | 单独记录实际收费 Carrier Peering 用量及金额，计入五项总流量估算，**不可被** Standard Tier 200 GiB 免费额度抵扣 |
+
+自动同步采用 [Standard usage cost export](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage)（表名 `gcp_billing_export_v1_<BILLING_ACCOUNT_ID>`），不启用 FOCUS、Detailed usage cost 或 Pricing export；由 VPS 本地 systemd timer（[`deploy/traffic-review-bill-sync.timer`](../deploy/traffic-review-bill-sync.timer) / [`deploy/traffic-review-bill-sync.service`](../deploy/traffic-review-bill-sync.service)）每 12 小时执行一次，保留上述 CSV 手工导入作为备用：
+
+```sh
+# 离线模拟快照验证（不连接 GCP）
+./traffic-review sync-bill --db /var/lib/s-ui-traffic-review/review.db --mock-export deploy/traffic-review-standard-export.example.json
+
+# 正式启用前先执行 BigQuery Dry Run 检查扫描量与存储上限
+./traffic-review sync-bill --db /var/lib/s-ui-traffic-review/review.db \
+  --query-project <QUERY_PROJECT_ID> --dataset-project <DATASET_PROJECT_ID> \
+  --dataset <BILLING_DATASET> --table gcp_billing_export_v1_<BILLING_ACCOUNT_ID> \
+  --target-project <TARGET_PROJECT_ID> --lookback-days 7 --max-bytes 67108864 --max-monthly-bytes 4160749568 --adc --dry-run
+
+# 输出 Carrier Peering 相关性候选、独立中转路由建议及中转前后账单对比
+./traffic-review analyze-candidates --db /var/lib/s-ui-traffic-review/review.db --date 2026-10-17 --timezone America/Los_Angeles
+```
+
+预算与安全边界：
+- **本工具查询预算**：单次 `maximumBytesBilled` 默认 `64 MiB`，本地月度累计上限 `3.875 GiB`，按 [BigQuery 公开按需价 $6.25/TiB](https://cloud.google.com/bigquery/pricing) 估算查询约 `$0.0237/月`。执行前在 SQLite 中串行预留完整单次上限；成功后记录实际 billed bytes，超时/失败/中断保留保守预留，跨进程并发不会重复占用同一份预算。源账单**表**的存储量检查上限为 `10 GiB`，并非整个数据集；它只暂停本工具读取，不会阻止云端表继续增长。账户其他查询量不会自动发现，可通过 `--existing-monthly-bytes` 提供额外保守预留。此保护不保证账户全部查询、存储或其他服务总账单小于 `$0.05/月`，也不自动提高预算。
+- **幂等更新、延迟与更正**：Google 账单导出常有 `>24 小时` 延迟，首次启用回填最多可能需要 5 天。同步按 `(date, project_id, sku_id, currency)` 幂等重算回溯窗口：完全相同的 12 小时轮询不会重复累加金额；迟到账单或历史冲正（`export_time` 更新且数值变化）会原地替换为最新日汇总并记录 `bill_correction` 审计告警；缺失或待更新窗口保持 `dataPending=true`，不把缺数据当成 `$0`。
+- **认证边界**：仅使用 VM 服务账号 ADC（授予查询项目 `roles/bigquery.jobUser` 与账单数据集 `roles/bigquery.dataViewer`），拒绝长期 JSON 私钥文件。
+- **Carrier Peering 站点候选与中转槽位（默认保留待配置）**：由于 Google 账单不包含逐域名/逐连接映射，候选分析仅提供基于时间窗、字节量、代理用户与出站路由的相关性证据（`flowBillingConfirmed` 始终为 `false`）。当前中转节点尚未制定，`RelaySuggestion` 默认保持 `status="pending_configuration"`（`configured=false`、规则出站占位符 `<PENDING_RELAY_OUTBOUND>`），仅针对 `proxy` 或 `to_remote` 远端目标生成候选列表（自动排除 `to_client` 客户端回程 IP）；待后续确定中转节点后，可通过 `--relay-outbound <TAG>` 生成预览规则，并用 `CompareRelayPeriods` 对比中转前后的真实 Carrier Peering 账单变化。
 
 ## 质量、容量与验收
 

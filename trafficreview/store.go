@@ -79,11 +79,24 @@ CREATE TABLE IF NOT EXISTS traffic_minutes (at INTEGER,layer TEXT,peer TEXT,doma
 CREATE TABLE IF NOT EXISTS review_checkpoints (id TEXT PRIMARY KEY,up INTEGER NOT NULL,down INTEGER NOT NULL,seen INTEGER NOT NULL,known INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS review_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT,at INTEGER NOT NULL,kind TEXT NOT NULL,message TEXT NOT NULL,rule_version TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS review_alert_time ON review_alerts(at);
-CREATE TABLE IF NOT EXISTS review_bills (date TEXT,project_id TEXT,sku_id TEXT,description TEXT,usage_gib TEXT,cost TEXT,currency TEXT,source_sha TEXT,scope TEXT NOT NULL,PRIMARY KEY(date,project_id,sku_id,currency));
+CREATE TABLE IF NOT EXISTS review_bills (date TEXT,project_id TEXT,sku_id TEXT,description TEXT,usage_gib TEXT,cost TEXT,currency TEXT,source_sha TEXT,scope TEXT NOT NULL,invoice_month TEXT NOT NULL DEFAULT '',credits TEXT NOT NULL DEFAULT '0',net_cost TEXT NOT NULL DEFAULT '',usage_unit TEXT NOT NULL DEFAULT 'GiB',export_time INTEGER NOT NULL DEFAULT 0,synced_at INTEGER NOT NULL DEFAULT 0,sync_source TEXT NOT NULL DEFAULT 'csv_manual',PRIMARY KEY(date,project_id,sku_id,currency));
+CREATE TABLE IF NOT EXISTS review_billing_sync_runs (id INTEGER PRIMARY KEY AUTOINCREMENT,at INTEGER NOT NULL,month TEXT NOT NULL,mode TEXT NOT NULL,estimated_bytes INTEGER NOT NULL,billed_bytes INTEGER NOT NULL,dataset_storage_bytes INTEGER NOT NULL,existing_monthly_bytes INTEGER NOT NULL,rows_upserted INTEGER NOT NULL,rows_corrected INTEGER NOT NULL,max_export_time INTEGER NOT NULL,status TEXT NOT NULL,message TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS review_billing_sync_month ON review_billing_sync_runs(month,at);
 `, applicationID)
 	if _, err = db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
+	}
+	for _, alter := range []string{
+		"ALTER TABLE review_bills ADD COLUMN invoice_month TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE review_bills ADD COLUMN credits TEXT NOT NULL DEFAULT '0'",
+		"ALTER TABLE review_bills ADD COLUMN net_cost TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE review_bills ADD COLUMN usage_unit TEXT NOT NULL DEFAULT 'GiB'",
+		"ALTER TABLE review_bills ADD COLUMN export_time INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE review_bills ADD COLUMN synced_at INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE review_bills ADD COLUMN sync_source TEXT NOT NULL DEFAULT 'csv_manual'",
+	} {
+		_, _ = db.Exec(alter)
 	}
 	return s, nil
 }
@@ -144,6 +157,7 @@ func (s *Store) Retain(now int64) error {
 		{"DELETE FROM traffic_minutes WHERE at<?", now - 7*86400},
 		{"DELETE FROM review_checkpoints WHERE seen<?", now - 7200},
 		{"DELETE FROM review_alerts WHERE at<?", now - 90*86400},
+		{"DELETE FROM review_billing_sync_runs WHERE at<?", now - 90*86400},
 	} {
 		if _, err = tx.Exec(q.sql, q.arg); err != nil {
 			return err
@@ -237,6 +251,9 @@ func (s *Store) Summary(r Range) (Summary, error) {
 		return v, err
 	}
 	err = s.db.QueryRow("SELECT COALESCE(SUM(CASE WHEN layer='proxy' THEN up ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='proxy' THEN down ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN tx ELSE 0 END),0),COALESCE(SUM(CASE WHEN layer='network' THEN rx ELSE 0 END),0) FROM traffic_minutes WHERE at>=? AND at<?", r.From/60*60, r.To).Scan(&v.ProxyUploadBytes, &v.ProxyDownloadBytes, &v.NetworkEgressBytes, &v.NetworkIngressBytes)
+	v.NICTotalBytes = v.RXBytes + v.TXBytes
+	v.ProxyTotalBytes = v.ProxyUploadBytes + v.ProxyDownloadBytes
+	v.NetworkTotalBytes = v.NetworkEgressBytes + v.NetworkIngressBytes
 	// Destination detail expires after seven days. It must never be displayed as
 	// complete history merely because the interface total is still retained.
 	v.Partial = quality != 0 || !first.Valid || first.Int64 > r.From+60 || r.From < time.Now().Add(-7*24*time.Hour).Unix() || v.LastSampleAt < r.To-120
@@ -256,6 +273,13 @@ func (s *Store) Summary(r Range) (Summary, error) {
 	var sampleAt sql.NullInt64
 	if e := s.db.QueryRow("SELECT MAX(at) FROM nic_samples WHERE at>=? AND at<?", r.From, r.To).Scan(&sampleAt); e == nil && sampleAt.Valid {
 		v.LastSampleAt = sampleAt.Int64
+	}
+	if overview, e := s.BillingOverview(r, time.Now()); e == nil {
+		v.BillingOverview = &overview
+	}
+	if corr, e := s.CarrierCorrelation(r); e == nil {
+		corr.Partial = v.Partial
+		v.CarrierCorrelation = &corr
 	}
 	return v, err
 }

@@ -1,7 +1,8 @@
 import type {
-  FeeStatus, TrafficAlert, TrafficBillingRecord, TrafficConfidence,
-  TrafficDestination, TrafficHealth, TrafficReviewEndpoint, TrafficSeriesPoint,
-  TrafficSummary,
+  FeeStatus, TrafficAlert, TrafficBillingOverview, TrafficBillingRecord,
+  TrafficCarrierCandidate, TrafficCarrierCorrelation, TrafficConfidence,
+  TrafficDestination, TrafficHealth, TrafficReviewEndpoint, TrafficSKUBillingBucket,
+  TrafficSeriesPoint, TrafficSummary,
 } from '@/types/trafficReview'
 
 type RecordValue = Record<string, unknown>
@@ -13,10 +14,138 @@ const number = (value: unknown): number | null =>
 const decimal = (value: unknown): string | null =>
   typeof value === 'string' && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) ? value : null
 const boolean = (value: unknown): boolean => value === true
+const stringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 
 function list(value: unknown): RecordValue[] | null {
   if (!Array.isArray(value)) return null
   return value.map(record).filter((item): item is RecordValue => item !== null)
+}
+
+function adaptSKUBucket(value: unknown): TrafficSKUBillingBucket | null {
+  const item = record(value)
+  if (!item) return null
+  return {
+    skuID: text(item.skuID),
+    description: text(item.description),
+    category: text(item.category),
+    handling: text(item.handling),
+    countsTowardStandard200GiB: boolean(item.countsTowardStandard200GiB),
+    usageGiB: decimal(item.usageGiB),
+    grossCost: decimal(item.grossCost),
+    credits: decimal(item.credits),
+    netCost: decimal(item.netCost),
+    currency: text(item.currency),
+    rowCount: number(item.rowCount) ?? 0,
+  }
+}
+
+function adaptBillingOverview(value: unknown): TrafficBillingOverview | null {
+  const item = record(value)
+  if (!item) return null
+  const ref = record(item.standardTierReference) ?? {}
+  const tot = record(item.totals) ?? {}
+  const sync = record(item.syncStatus) ?? {}
+  const targetSKUs = (list(item.targetSKUs) ?? [])
+    .map(adaptSKUBucket)
+    .filter((b): b is TrafficSKUBillingBucket => b !== null)
+  return {
+    targetSKUs,
+    totals: {
+      targetTotalUsageGiB: decimal(tot.targetTotalUsageGiB),
+      standardFreeTierUsageGiB: decimal(tot.standardFreeTierUsageGiB),
+      nonStandardUsageGiB: decimal(tot.nonStandardUsageGiB),
+      carrierPeeringUsageGiB: decimal(tot.carrierPeeringUsageGiB),
+      internalReferenceUsageGiB: decimal(tot.internalReferenceUsageGiB),
+      targetGrossCost: decimal(tot.targetGrossCost),
+      targetCredits: decimal(tot.targetCredits),
+      targetNetCost: decimal(tot.targetNetCost),
+      allImportedUsageGiB: decimal(tot.allImportedUsageGiB),
+      allImportedNetCost: decimal(tot.allImportedNetCost),
+      currency: text(tot.currency),
+      estimationNote: text(tot.estimationNote),
+    },
+    standardTierReference: {
+      referenceLimitGiB: decimal(ref.referenceLimitGiB),
+      targetVMDescription: text(ref.targetVMDescription),
+      targetVMEgressSKU: text(ref.targetVMEgressSKU),
+      targetVMUsedGiB: decimal(ref.targetVMUsedGiB),
+      targetVMRemainingRefGiB: decimal(ref.targetVMRemainingRefGiB),
+      excludedTargetSKUsGiB: decimal(ref.excludedTargetSKUsGiB),
+      quotaScope: text(ref.quotaScope),
+      measuredScope: text(ref.measuredScope),
+      accountWideComplete: boolean(ref.accountWideComplete),
+      note: text(ref.note),
+    },
+    carrierPeeringActual: adaptSKUBucket(item.carrierPeeringActual),
+    otherSKUsCount: number(item.otherSKUsCount) ?? 0,
+    syncStatus: {
+      enabled: boolean(sync.enabled),
+      mode: text(sync.mode),
+      intervalHours: number(sync.intervalHours) ?? 12,
+      lastSyncAt: number(sync.lastSyncAt),
+      lastExportTime: number(sync.lastExportTime),
+      lastStatus: text(sync.lastStatus),
+      dataPending: boolean(sync.dataPending),
+      lagNotice: text(sync.lagNotice),
+      maxBytesPerQuery: number(sync.maxBytesPerQuery),
+      maxMonthlyBytes: number(sync.maxMonthlyBytes),
+      monthlyScannedBytes: number(sync.monthlyScannedBytes),
+      estimatedMonthlyUSD: decimal(sync.estimatedMonthlyUSD),
+      monthlyBudgetLimitUSD: decimal(sync.monthlyBudgetLimitUSD),
+      budgetPaused: boolean(sync.budgetPaused),
+    },
+    accountingNote: text(item.accountingNote),
+  }
+}
+
+function adaptCarrierCorrelation(value: unknown): TrafficCarrierCorrelation | null {
+  const item = record(value)
+  if (!item) return null
+  const relay = record(item.relaySuggestion) ?? {}
+  const candidates = (list(item.candidates) ?? []).map((c): TrafficCarrierCandidate => ({
+    destination: text(c.destination),
+    peer: text(c.peer),
+    domain: text(c.domain),
+    user: text(c.user),
+    inbound: text(c.inbound),
+    outbound: text(c.outbound),
+    protocol: text(c.protocol),
+    layer: text(c.layer),
+    leg: c.leg === 'to_remote' || c.leg === 'to_client' ? c.leg : 'unknown',
+    business: text(c.business),
+    egressBytes: number(c.egressBytes),
+    ingressBytes: number(c.ingressBytes),
+    egressGiB: decimal(c.egressGiB),
+    windowSharePercent: decimal(c.windowSharePercent),
+    correlationLevel: text(c.correlationLevel),
+    confidence: (['observed', 'inferred'].includes(text(c.confidence)) ? c.confidence : 'unknown') as TrafficConfidence,
+    evidenceBasis: text(c.evidenceBasis),
+    collectionGap: text(c.collectionGap),
+    suggestedOutboundTag: text(c.suggestedOutboundTag),
+    flowBillingConfirmed: false,
+  }))
+  return {
+    billedCarrierPeeringGiB: decimal(item.billedCarrierPeeringGiB),
+    billedCarrierPeeringCost: decimal(item.billedCarrierPeeringCost),
+    billedCurrency: text(item.billedCurrency),
+    localProxyCandidateGiB: decimal(item.localProxyCandidateGiB),
+    localNetworkCandidateGiB: decimal(item.localNetworkCandidateGiB),
+    candidates,
+    relaySuggestion: {
+      status: text(relay.status) || 'pending_configuration',
+      configured: boolean(relay.configured),
+      outboundTag: text(relay.outboundTag) || 'pending_configuration',
+      domains: stringArray(relay.domains),
+      ipCIDRs: stringArray(relay.ipCIDRs),
+      singBoxRule: record(relay.singBoxRule),
+      manualOnly: relay.manualOnly !== false,
+      warnings: stringArray(relay.warnings),
+    },
+    partial: boolean(item.partial),
+    flowBillingConfirmed: false,
+    boundaryNote: text(item.boundaryNote),
+  }
 }
 
 export function adaptTrafficReviewData(endpoint: TrafficReviewEndpoint, value: unknown): unknown {
@@ -30,16 +159,21 @@ export function adaptTrafficReviewData(endpoint: TrafficReviewEndpoint, value: u
       ruleVersion: text(item.ruleVersion),
       rxBytes: number(item.rxBytes),
       txBytes: number(item.txBytes),
+      nicTotalBytes: number(item.nicTotalBytes),
       proxyUploadBytes: number(item.proxyUploadBytes),
       proxyDownloadBytes: number(item.proxyDownloadBytes),
+      proxyTotalBytes: number(item.proxyTotalBytes),
       networkEgressBytes: number(item.networkEgressBytes),
       networkIngressBytes: number(item.networkIngressBytes),
+      networkTotalBytes: number(item.networkTotalBytes),
       lastSampleAt: number(item.lastSampleAt),
       samplingSeconds: number(item.samplingSeconds) ?? 0,
       partial: boolean(item.partial),
       // A flow-level billing claim is never inferred from counters.
       flowBillingConfirmed: boolean(item.flowBillingConfirmed),
       disclaimer: text(item.disclaimer),
+      billingOverview: adaptBillingOverview(item.billingOverview),
+      carrierCorrelation: adaptCarrierCorrelation(item.carrierCorrelation),
     }
     return result
   }
@@ -97,5 +231,14 @@ export function adaptTrafficReviewData(endpoint: TrafficReviewEndpoint, value: u
     cost: decimal(item.cost), currency: text(item.currency),
     sourceSHA256: text(item.sourceSHA256),
     scope: item.scope === 'project_day_sku' ? 'project_day_sku' : 'unknown',
+    category: text(item.category),
+    accountingTreatment: text(item.accountingTreatment),
+    countsTowardStandard200GiB: boolean(item.countsTowardStandard200GiB),
+    invoiceMonth: text(item.invoiceMonth),
+    credits: decimal(item.credits),
+    netCost: decimal(item.netCost),
+    exportTime: number(item.exportTime),
+    syncedAt: number(item.syncedAt),
+    syncSource: text(item.syncSource),
   })) ?? null
 }

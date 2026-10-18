@@ -64,7 +64,7 @@ func TestTrafficReviewRequiresRealCookieAndIsReadOnly(t *testing.T) {
 	if plain.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("non-XHR review request returned %d", plain.StatusCode)
 	}
-	for _, action := range []string{"summary", "series", "destinations", "alerts", "health", "billing"} {
+	for _, action := range []string{"summary", "series", "destinations", "alerts", "health", "billing", "billing-overview", "candidates"} {
 		status, body := reviewRequest(t, anonymous, http.MethodGet, base+action+query, "")
 		if status != http.StatusUnauthorized || body["success"] != false {
 			t.Fatalf("anonymous %s: %d %+v", action, status, body)
@@ -130,7 +130,7 @@ func TestTrafficReviewRequiresRealCookieAndIsReadOnly(t *testing.T) {
 		t.Fatalf("real API token alone returned %d", response.StatusCode)
 	}
 
-	for _, action := range []string{"summary", "series", "destinations", "alerts", "health", "billing"} {
+	for _, action := range []string{"summary", "series", "destinations", "alerts", "health", "billing", "billing-overview", "candidates"} {
 		status, body := reviewRequest(t, client, http.MethodGet, base+action+query, "")
 		if status != http.StatusOK || body["success"] != true {
 			t.Fatalf("authenticated %s: %d %+v", action, status, body)
@@ -142,8 +142,18 @@ func TestTrafficReviewRequiresRealCookieAndIsReadOnly(t *testing.T) {
 		switch action {
 		case "summary":
 			v, ok := obj.(map[string]any)
-			if !ok || v["ruleVersion"] == nil || v["disclaimer"] == nil || v["flowBillingConfirmed"] != false {
+			if !ok || v["ruleVersion"] == nil || v["disclaimer"] == nil || v["flowBillingConfirmed"] != false || v["billingOverview"] == nil {
 				t.Fatalf("summary contract: %+v", obj)
+			}
+		case "billing-overview":
+			v, ok := obj.(map[string]any)
+			if !ok || v["targetSKUs"] == nil || v["standardTierReference"] == nil || v["syncStatus"] == nil {
+				t.Fatalf("billing-overview contract: %+v", obj)
+			}
+		case "candidates":
+			v, ok := obj.(map[string]any)
+			if !ok || v["flowBillingConfirmed"] != false || v["relaySuggestion"] == nil {
+				t.Fatalf("candidates contract: %+v", obj)
 			}
 		case "health":
 			v, ok := obj.(map[string]any)

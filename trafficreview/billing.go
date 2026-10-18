@@ -79,7 +79,8 @@ func (s *Store) ImportBill(reader io.Reader) (int, error) {
 		if usage.Sign() < 0 {
 			return 0, errors.New("usage_gib must not be negative")
 		}
-		bill := Bill{Date: row[0], ProjectID: row[1], SKUID: row[2], Description: row[3], UsageGiB: row[4], Cost: row[5], Currency: row[6], SourceSHA256: hash, Scope: "project_day_sku"}
+		bill := Bill{Date: row[0], ProjectID: row[1], SKUID: row[2], Description: row[3], UsageGiB: row[4], Cost: row[5], Currency: row[6], SourceSHA256: hash, Scope: "project_day_sku", InvoiceMonth: strings.ReplaceAll(row[0][:7], "-", ""), Credits: "0", NetCost: row[5], UsageUnit: "GiB", SyncSource: "csv_manual"}
+		enrichBillSKU(&bill)
 		key := bill.Date + "\x00" + bill.ProjectID + "\x00" + bill.SKUID + "\x00" + bill.Currency
 		if previous, ok := seen[key]; ok {
 			if !sameBill(previous, bill) {
@@ -113,7 +114,7 @@ func (s *Store) ImportBill(reader io.Reader) (int, error) {
 		if err != sql.ErrNoRows {
 			return 0, err
 		}
-		if _, e = tx.Exec("INSERT INTO review_bills VALUES(?,?,?,?,?,?,?,?,?)", bill.Date, bill.ProjectID, bill.SKUID, bill.Description, bill.UsageGiB, bill.Cost, bill.Currency, bill.SourceSHA256, bill.Scope); e != nil {
+		if _, e = tx.Exec("INSERT INTO review_bills(date,project_id,sku_id,description,usage_gib,cost,currency,source_sha,scope,invoice_month,credits,net_cost,usage_unit,export_time,synced_at,sync_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", bill.Date, bill.ProjectID, bill.SKUID, bill.Description, bill.UsageGiB, bill.Cost, bill.Currency, bill.SourceSHA256, bill.Scope, bill.InvoiceMonth, bill.Credits, bill.NetCost, bill.UsageUnit, bill.ExportTime, time.Now().Unix(), bill.SyncSource); e != nil {
 			return 0, e
 		}
 		inserted++
@@ -134,6 +135,14 @@ func sameBill(a, b Bill) bool {
 }
 
 func (s *Store) Bills(r Range) ([]Bill, error) {
+	return s.readBills(r, true)
+}
+
+func (s *Store) allBills(r Range) ([]Bill, error) {
+	return s.readBills(r, false)
+}
+
+func (s *Store) readBills(r Range, limited bool) ([]Bill, error) {
 	// Imported dates always name Pacific billing days, regardless of the
 	// display timezone. A Shanghai-day query can intersect two billing days.
 	loc, e := time.LoadLocation("America/Los_Angeles")
@@ -142,7 +151,13 @@ func (s *Store) Bills(r Range) ([]Bill, error) {
 	}
 	from := time.Unix(r.From, 0).In(loc).Format("2006-01-02")
 	to := time.Unix(r.To-1, 0).In(loc).Format("2006-01-02")
-	rows, e := s.db.Query("SELECT date,project_id,sku_id,description,usage_gib,cost,currency,source_sha,scope FROM review_bills WHERE date>=? AND date<=? ORDER BY date DESC,project_id,sku_id,currency LIMIT ?", from, to, r.Limit)
+	query := "SELECT date,project_id,sku_id,description,usage_gib,cost,currency,source_sha,scope,invoice_month,credits,net_cost,usage_unit,export_time,synced_at,sync_source FROM review_bills WHERE date>=? AND date<=? ORDER BY date DESC,project_id,sku_id,currency"
+	args := []any{from, to}
+	if limited {
+		query += " LIMIT ?"
+		args = append(args, r.Limit)
+	}
+	rows, e := s.db.Query(query, args...)
 	if e != nil {
 		return nil, e
 	}
@@ -150,9 +165,13 @@ func (s *Store) Bills(r Range) ([]Bill, error) {
 	out := []Bill{}
 	for rows.Next() {
 		var b Bill
-		if e = rows.Scan(&b.Date, &b.ProjectID, &b.SKUID, &b.Description, &b.UsageGiB, &b.Cost, &b.Currency, &b.SourceSHA256, &b.Scope); e != nil {
+		if e = rows.Scan(&b.Date, &b.ProjectID, &b.SKUID, &b.Description, &b.UsageGiB, &b.Cost, &b.Currency, &b.SourceSHA256, &b.Scope, &b.InvoiceMonth, &b.Credits, &b.NetCost, &b.UsageUnit, &b.ExportTime, &b.SyncedAt, &b.SyncSource); e != nil {
 			return nil, e
 		}
+		if b.NetCost == "" {
+			b.NetCost = b.Cost
+		}
+		enrichBillSKU(&b)
 		out = append(out, b)
 	}
 	return out, rows.Err()

@@ -85,6 +85,9 @@ func (s *Store) Collect(ctx context.Context, o CollectorOptions) error {
 	if e = s.Alert(first.At, "collector_start_gap", "Collector epoch "+epoch+" started; kernel flows first observed as snapshots are baselined"); e != nil {
 		return e
 	}
+	if e = notifyCollectorReady(); e != nil {
+		return e
+	}
 	ticker := time.NewTicker(o.Interval)
 	defer ticker.Stop()
 	ticks := 0
