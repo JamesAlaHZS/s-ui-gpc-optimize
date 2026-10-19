@@ -23,10 +23,31 @@ import (
 func TestTrafficReviewServicePersistsRealProxyPayload(t *testing.T) {
 	requestBody := bytes.Repeat([]byte("upload"), 100)
 	responseBody := bytes.Repeat([]byte("download"), 200)
+	c := core.NewCore()
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil || !bytes.Equal(body, requestBody) {
 			t.Errorf("origin request body: %d bytes, %v", len(body), err)
+		}
+		// Delivery to the origin can wake this handler before the proxy's
+		// asynchronous copy has committed its upload counter. Observe the live
+		// counter before returning a response and immediately stopping review.
+		// Sessions is read-only; DrainReview would steal the service's queue.
+		observed := false
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+			for _, session := range c.GetInstance().SessionTracker().Sessions() {
+				if session.Upload >= int64(len(requestBody)) {
+					observed = true
+					break
+				}
+			}
+			if observed {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		if !observed {
+			t.Error("proxy upload counter did not catch up with delivered request")
 		}
 		_, _ = w.Write(responseBody)
 	}))
@@ -37,7 +58,6 @@ func TestTrafficReviewServicePersistsRealProxyPayload(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
-	c := core.NewCore()
 	configuration := fmt.Sprintf(`{"log":{"level":"error"},"inbounds":[{"type":"mixed","tag":"review-test","listen":"127.0.0.1","listen_port":%d}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`, port)
 	if err := c.Start([]byte(configuration)); err != nil {
 		t.Fatal(err)
