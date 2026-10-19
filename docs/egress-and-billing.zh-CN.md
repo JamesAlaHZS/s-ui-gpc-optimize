@@ -127,6 +127,8 @@ bash /usr/local/s-ui/deploy/configure-billing.sh --info
 
 ### 第四步：确认表名并填写向导
 
+输入 `s-ui`，选择 **21. GCP 账单同步配置** 即可打开向导；也可直接执行 `s-ui bill`。配置完成或失败后按回车返回主菜单。
+
 在 BigQuery 中点击自动生成的标准表，打开“详情”，复制 **表 ID**，例如：
 
 ```text

@@ -904,6 +904,14 @@ generate_self_signed_cert() {
     before_show_menu
 }
 
+configure_billing() {
+    if [[ ! -f /usr/local/s-ui/deploy/configure-billing.sh ]]; then
+        LOGE "账单配置脚本不存在，请先更新 S-UI。"
+        return 1
+    fi
+    bash /usr/local/s-ui/deploy/configure-billing.sh "$@"
+}
+
 show_usage() {
     echo -e "S-UI Control Menu Usage"
     echo -e "------------------------------------------"
@@ -956,9 +964,11 @@ show_menu() {
   ${green}19.${plain} SSL Certificate Management
   ${green}20.${plain} Cloudflare SSL Certificate
 ————————————————————————————————
+  ${green}21.${plain} GCP 账单同步配置
+————————————————————————————————
  "
     show_status s-ui
-    echo && read -p "Please enter your selection [0-20]: " num
+    echo && read -p "Please enter your selection [0-21]: " num
 
     case "${num}" in
     0)
@@ -1024,8 +1034,14 @@ show_menu() {
     20)
         ssl_cert_issue_CF
         ;;
+    21)
+        if check_install; then
+            configure_billing
+            before_show_menu
+        fi
+        ;;
     *)
-        LOGE "Please enter the correct number [0-20]"
+        LOGE "Please enter the correct number [0-21]"
         ;;
     esac
 }
@@ -1061,7 +1077,7 @@ if [[ $# > 0 ]]; then
         ;;
     "bill")
         shift
-        bash /usr/local/s-ui/deploy/configure-billing.sh "$@"
+        configure_billing "$@"
         ;;
     "uninstall")
         check_install 0 && uninstall 0
