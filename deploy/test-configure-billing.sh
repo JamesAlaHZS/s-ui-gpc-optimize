@@ -31,6 +31,14 @@ cat >/usr/local/bin/traffic-review <<'SH'
 printf '%s\n' "$*" >>/sync.log
 [[ ! -f /fail-query ]] || exit 1
 [[ ! -f /fail-import || " $* " == *' --dry-run '* ]] || exit 1
+[[ ! -f /bad-result ]] || { echo '{}'; exit 0; }
+if [[ -f /empty-result ]]; then
+    echo '{"inserted":0,"corrected":0,"unchanged":0}'
+elif [[ -f /existing-result ]]; then
+    echo '{"inserted":0,"corrected":0,"unchanged":3}'
+else
+    echo '{"inserted":2,"corrected":1,"unchanged":3}'
+fi
 SH
 chmod +x /test-bin/* /usr/local/bin/traffic-review
 printf 'old-config\n' >/etc/s-ui/traffic-review-billing.env
@@ -45,7 +53,14 @@ if input | bash /src/deploy/configure-billing.sh >/result 2>&1; then echo 'Accep
 [[ $(cat /etc/s-ui/traffic-review-billing.env) == old-config ]]
 ! grep -q 'enable --now' /systemctl.log
 rm /fail-import
+touch /bad-result
+if input | bash /src/deploy/configure-billing.sh >/result 2>&1; then echo 'Accepted invalid sync result'; exit 1; fi
+[[ $(cat /etc/s-ui/traffic-review-billing.env) == old-config ]]
+! grep -q 'enable --now' /systemctl.log
+rm /bad-result
 input | bash /src/deploy/configure-billing.sh >/result
+grep -q '新增 2 条，修正 1 条，已有且未变 3 条' /result
+! grep -q '未返回匹配账单' /result
 grep -q '^GCP_QUERY_PROJECT=example-vps$' /etc/s-ui/traffic-review-billing.env
 grep -q '^GCP_TARGET_PROJECT=example-vps$' /etc/s-ui/traffic-review-billing.env
 [[ $(stat -c %a /etc/s-ui/traffic-review-billing.env) == 640 ]]
@@ -58,6 +73,17 @@ grep -qx 'OnCalendar=\*-\*-\* 00:15:00' /timer-config
 grep -qx 'RandomizedDelaySec=15m' /timer-config
 grep -qx 'Persistent=true' /timer-config
 grep -q -- '--adc --dry-run' /sync.log
+touch /empty-result
+input | bash /src/deploy/configure-billing.sh >/result
+grep -q '新增 0 条，修正 0 条，已有且未变 0 条' /result
+grep -q '本次未返回匹配账单' /result
+! grep -q '已导入首批数据' /result
+rm /empty-result
+touch /existing-result
+input | bash /src/deploy/configure-billing.sh >/result
+grep -q '已有且未变 3 条' /result
+! grep -q '未返回匹配账单' /result
+rm /existing-result
 before=$(wc -l </sync.log)
 if printf 'unsafe;touch /injected\n\nbilling_export\ngcp_billing_export_v1_ABCDEF_123456\n\n' | bash /src/deploy/configure-billing.sh >/result 2>&1; then echo 'Accepted unsafe project'; exit 1; fi
 [[ ! -f /injected && $(wc -l </sync.log) == "$before" ]]

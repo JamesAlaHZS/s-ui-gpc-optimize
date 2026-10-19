@@ -6,7 +6,7 @@ metadata() { curl --noproxy '*' -fsS --connect-timeout 2 --max-time 5 -H 'Metada
 vm_project=$(metadata project/project-id)
 if [[ ${1:-} == --info ]]; then
     printf 'VPS 项目 ID：%s\n服务账号：%s\n访问范围：\n%s\n' "${vm_project:-未获取，请确认运行在 GCE 虚拟机中}" "$(metadata instance/service-accounts/default/email)" "$(metadata instance/service-accounts/default/scopes)"
-    echo '需要服务账号、cloud-platform 范围，以及查询项目的 BigQuery 作业用户和账单数据集的数据查看者权限。'
+    echo '需要 BigQuery 或 cloud-platform 访问范围，以及查询项目的 BigQuery 作业用户和账单数据集的数据查看者权限。'
     exit 0
 fi
 [[ $# -eq 0 ]] || fail '仅支持无参数或 --info。'
@@ -39,7 +39,7 @@ cleanup() { rm -f "$error_file"; [[ -z $env_file ]] || rm -f "$env_file"; }
 trap cleanup EXIT
 run_sync() {
     if ! runuser -u "$monitor" -- /usr/local/bin/traffic-review "${args[@]}" "$@" >"$error_file" 2>&1; then
-        echo '查询失败：403 请检查服务账号 IAM 和 cloud-platform 范围；404 请检查数据集和表名；扫描超限请查看教程。' >&2
+        echo '查询失败：403 请检查服务账号 IAM 和 BigQuery/cloud-platform 访问范围；404 请检查数据集和表名；扫描超限请查看教程。' >&2
         cat "$error_file" >&2
         return 1
     fi
@@ -48,6 +48,15 @@ echo '正在预检权限、表和查询扫描上限……'
 run_sync --dry-run || fail '预检未通过；原配置和定时器未修改。'
 echo '正在同步最近 7 天账单……'
 run_sync || fail '首次同步未完成；原配置和定时器未修改。'
+for field in inserted corrected unchanged; do
+    pattern="\"$field\"[[:space:]]*:[[:space:]]*([0-9]+)"
+    [[ $(cat "$error_file") =~ $pattern ]] || fail '同步结果格式异常；原配置和定时器未修改。'
+    printf -v "$field" '%s' "${BASH_REMATCH[1]}"
+done
+printf '本次同步：新增 %s 条，修正 %s 条，已有且未变 %s 条。\n' "$inserted" "$corrected" "$unchanged"
+if [[ $inserted == 0 && $corrected == 0 && $unchanged == 0 ]]; then
+    echo '本次未返回匹配账单：可能尚未导出，或所选项目/日期无数据；空账单不代表零费用。'
+fi
 install -d -m 0750 -o root -g "$monitor_group" /etc/s-ui
 env_file=$(mktemp /etc/s-ui/.billing-env.XXXXXX)
 printf 'GCP_QUERY_PROJECT=%s\nGCP_DATASET_PROJECT=%s\nGCP_BILLING_DATASET=%s\nGCP_BILLING_TABLE=%s\nGCP_TARGET_PROJECT=%s\n' "$query_project" "$dataset_project" "$dataset" "$table" "$target_project" >"$env_file"
@@ -57,6 +66,6 @@ mv -f "$env_file" /etc/s-ui/traffic-review-billing.env
 env_file=''
 systemctl daemon-reload
 systemctl enable --now traffic-review-bill-sync.timer
-echo '完成：已导入首批数据，并开启每天一次同步。导出没有固定到达时间；空账单不代表零费用。'
+echo '完成：已开启每天一次同步。Google 导出没有固定到达时间。'
 echo '面板 → 出站流量 → GCP 账单：选洛杉矶时间和已导出的日期。'
 echo '查看定时器：systemctl list-timers traffic-review-bill-sync.timer --all'
