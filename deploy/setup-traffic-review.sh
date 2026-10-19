@@ -76,4 +76,12 @@ fi
 systemctl daemon-reload
 systemctl enable traffic-review-collector.service
 systemctl restart traffic-review-collector.service
-echo "Traffic review enabled on $iface. BigQuery billing sync requires your GCP project/dataset configuration; its timer was not enabled."
+echo "流量采集已在 $iface 启用。"
+timer_active=未运行
+timer_enabled=否
+if systemctl is-active --quiet traffic-review-bill-sync.timer; then timer_active=运行中; fi
+if systemctl is-enabled --quiet traffic-review-bill-sync.timer; then timer_enabled=是; fi
+printf '账单定时器：%s；开机自动启用：%s。\n' "$timer_active" "$timer_enabled"
+if [[ ! -f /etc/s-ui/traffic-review-billing.env ]]; then
+    echo '账单同步尚未配置，请执行 s-ui bill。'
+fi

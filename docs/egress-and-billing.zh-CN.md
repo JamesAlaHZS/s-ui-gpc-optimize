@@ -156,6 +156,8 @@ sudo bash /usr/local/s-ui/deploy/configure-billing.sh
 
 向导先空跑预检（dry-run，不实际执行查询），再同步最近 7 天。**两步都成功后**才写入 `/etc/s-ui/traffic-review-billing.env` 并启用定时器；失败时保留原配置和原定时器状态。向导自动识别同步服务用户并设置文件权限，不要把用户或组硬编码为 `sui-monitor`。不需要手工复制 systemd 文件，不需要运行 `gcloud auth application-default login`。
 
+向导显示本次新增、修正和已有未变的记录数。三项均为 0 表示本次没有匹配账单，不代表已经导入，也不代表没有费用；检查源表、所选项目和日期。重新运行采集器安装脚本会显示账单定时器的实际运行与开机启用状态，不会关闭已有账单定时器。
+
 预检失败按下方错误表处理，修正或等待表生成后再运行同一向导。`404` 不能证明 IAM 与认证已全部通过；不要把所有失败都当成“建表中”并无限重试。
 
 ### 第五步：确认同步成功
@@ -184,7 +186,7 @@ sudo tail -n 40 /var/lib/s-ui-traffic-review/bill-sync.err
 
 | 情况 | 处理 |
 |---|---|
-| `403` / `ACCESS_DENIED` | 核对授权对象是 VPS 服务账号；检查作业用户、数据集查看者、BigQuery API 和 cloud-platform 范围。权限生效后重跑向导。 |
+| `403` / `ACCESS_DENIED` | 核对授权对象是 VPS 服务账号；检查作业用户、数据集查看者、BigQuery API 和 BigQuery 或 cloud-platform 访问范围。权限生效后重跑向导。 |
 | `404` / `Not found` | 核对项目、数据集、完整表名和报错中的位置；在 BigQuery 确认该表实际存在。刚启用时可等待后重跑；不能据此认定权限已全部正确。 |
 | `dry_run_ok`，但尚无导入 | 只说明预检成功，不代表已经导入。用中文向导完成首次实际同步，或已有配置时手动启动同步服务。 |
 | 元数据认证失败 | 确认这是 GCE 虚拟机、已关联服务账号，且网络可访问元数据服务。 |

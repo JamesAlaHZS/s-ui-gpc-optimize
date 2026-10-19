@@ -62,7 +62,10 @@ func Open(path string, rules Rules) (*Store, error) {
 		return nil, err
 	}
 	f.Close()
-	db, err := sql.Open("sqlite3", sqliteURI(abs, "_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=on"))
+	// Panel, collector and billing sync share the database. Acquire the writer
+	// lock at transaction start: upgrading a deferred WAL read snapshot after
+	// another process commits fails immediately, bypassing busy_timeout.
+	db, err := sql.Open("sqlite3", sqliteURI(abs, "_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=on&_txlock=immediate"))
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +105,10 @@ CREATE INDEX IF NOT EXISTS review_billing_sync_month ON review_billing_sync_runs
 		"ALTER TABLE review_bills ADD COLUMN synced_at INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE review_bills ADD COLUMN sync_source TEXT NOT NULL DEFAULT 'csv_manual'",
 	} {
-		_, _ = db.Exec(alter)
+		if _, err = db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrate billing schema: %w", err)
+		}
 	}
 	if err = s.migrateHistory(); err != nil {
 		db.Close()
