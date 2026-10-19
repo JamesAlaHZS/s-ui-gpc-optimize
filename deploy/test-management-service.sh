@@ -98,6 +98,30 @@ for operation in stop start restart; do
     fi
 done
 
+# The numbered menu and CLI must launch the same billing wizard. Completing or
+# failing the wizard returns to the menu; CLI arguments and errors stay intact.
+mkdir -p /usr/local/s-ui/deploy
+cat >/usr/local/s-ui/deploy/configure-billing.sh <<'EOF'
+#!/bin/bash
+printf 'wizard:%s\n' "$*" >>/tmp/billing-calls
+exit "${TEST_BILL_STATUS:-0}"
+EOF
+for result in 0 37; do
+    printf '21\n\n0\n' | TEST_BILL_STATUS=$result bash /src/s-ui.sh >/tmp/management-output
+    [[ $(grep -c 'GCP 账单同步配置' /tmp/management-output) == 2 ]]
+done
+[[ $(grep -c '^wizard:$' /tmp/billing-calls) == 2 ]]
+bash /src/s-ui.sh bill --info >/tmp/management-output
+grep -q '^wizard:--info$' /tmp/billing-calls
+bill_status=0
+TEST_BILL_STATUS=37 bash /src/s-ui.sh bill >/tmp/management-output || bill_status=$?
+[[ $bill_status == 37 ]]
+rm /usr/local/s-ui/deploy/configure-billing.sh
+bill_status=0
+bash /src/s-ui.sh bill >/tmp/management-output || bill_status=$?
+[[ $bill_status == 1 ]]
+grep -q '账单配置脚本不存在' /tmp/management-output
+
 # Check service propagation in both init-system implementations, including
 # post-stop checks and the restart confirmation helper.
 sed '/^if \[\[ \$# > 0 \]\]; then/,$d' /src/s-ui.sh >/tmp/management-functions
