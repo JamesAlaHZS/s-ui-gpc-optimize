@@ -3,6 +3,21 @@ import { adaptTrafficReviewData } from './trafficReviewAdapter'
 import type { TrafficAlert, TrafficBillingRecord, TrafficDestination, TrafficSummary } from '@/types/trafficReview'
 
 describe('traffic review response adapter', () => {
+  it('keeps unavailable proxy analysis unknown and never confirms candidate billing', () => {
+    expect((adaptTrafficReviewData('summary', {}) as TrafficSummary).proxyAnalysis).toBeNull()
+    const summary = adaptTrafficReviewData('summary', { proxyAnalysis: {
+      observations: 0, candidateForwardedEgressBytes: 0, forwardedEgressBytes: 1024, unknownDomainBytes: 1024, flowBillingConfirmed: true,
+      billingComparison: { analysisFrom: 1000, analysisTo: 2000, status: 'insufficient_data', reason: 'insufficient_days', pairCount: 2, flowBillingConfirmed: true, scopes: [{ projectID: 'example-project', candidateCorrelation: null, carrierNetCost: '0.25', carrierUsageGiB: '3.5' }] },
+    } }) as TrafficSummary
+    expect(summary.proxyAnalysis?.observations).toBe(0)
+    expect(summary.proxyAnalysis?.hasObservations).toBeNull()
+    expect(summary.proxyAnalysis?.flowBillingConfirmed).toBe(false)
+    expect(summary.proxyAnalysis?.billingComparison.flowBillingConfirmed).toBe(false)
+    expect(summary.proxyAnalysis?.billingComparison.analysisFrom).toBe(1000)
+    expect(summary.proxyAnalysis?.billingComparison.analysisTo).toBe(2000)
+    expect(summary.proxyAnalysis?.billingComparison.scopes[0]?.candidateCorrelation).toBeNull()
+    expect(summary.proxyAnalysis?.billingComparison.scopes[0]?.carrierNetCost).toBe('0.25')
+  })
   it('preserves unavailable mixed-currency totals instead of presenting zero', () => {
     const summary = adaptTrafficReviewData('summary', {
       billingOverview: {

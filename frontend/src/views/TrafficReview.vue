@@ -79,30 +79,6 @@
     <v-divider class="mb-4" />
     <v-window v-model="tab">
       <v-window-item value="overview">
-        <v-alert
-          v-if="health && (!health.enabled || !health.available)"
-          type="warning"
-          variant="tonal"
-          class="mb-3"
-        >
-          {{ tr('collectorUnavailable') }}
-        </v-alert>
-        <v-alert
-          v-if="summary?.partial && summary.lastSampleAt"
-          type="info"
-          variant="tonal"
-          class="mb-3"
-        >
-          {{ tr('partial') }}
-        </v-alert>
-        <v-alert
-          v-if="sampleStale"
-          type="warning"
-          variant="tonal"
-          class="mb-3"
-        >
-          {{ tr('sampleStale') }}
-        </v-alert>
         <source-card
           endpoint="summary"
           :state="states.summary"
@@ -113,71 +89,136 @@
               cols="12"
               md="6"
             >
-              <p>{{ tr('txTotal') }}</p><strong
+              <p>{{ tr('proxyEgressTotal') }}</p>
+              <strong
                 class="text-display-medium d-block my-2"
-                data-testid="nic-egress"
-              >{{ formatBytes(summary?.lastSampleAt ? summary.txBytes : null) }}</strong><p class="text-medium-emphasis">
-                {{ tr('txTotalHint') }}
-              </p>
+                data-testid="proxy-egress"
+              >{{ formatBytes(proxyTotal) }}</strong>
             </v-col>
             <v-col
-              cols="6"
-              md="3"
+              cols="12"
+              md="6"
             >
-              <p>{{ tr('toRemote') }}</p><strong class="text-headline-small d-block my-2">{{ formatBytes(hasNetworkSamples ? summary?.toRemoteEgressBytes : null) }}</strong>
-            </v-col>
-            <v-col
-              cols="6"
-              md="3"
-            >
-              <p>{{ tr('toClient') }}</p><strong class="text-headline-small d-block my-2">{{ formatBytes(hasNetworkSamples ? summary?.toClientEgressBytes : null) }}</strong>
+              <p>{{ tr('proxyIngressTotal') }}</p>
+              <strong
+                class="text-display-medium d-block my-2"
+                data-testid="proxy-ingress"
+              >{{ formatBytes(proxyTotal) }}</strong>
             </v-col>
           </v-row>
-          <p class="mt-3 text-body-medium text-medium-emphasis">
-            {{ tr('connectionHint') }}
+          <p class="text-body-small">
+            {{ tr('proxyMirrorHint') }}
           </p>
-          <p class="mt-2 text-body-medium">
-            {{ tr('unknownDirection') }}: {{ formatBytes(hasNetworkSamples ? summary?.unknownDirectionEgressBytes : null) }} · {{ tr('connectionTotal') }}: {{ formatBytes(hasNetworkSamples ? summary?.networkEgressBytes : null) }}
+          <div class="d-flex flex-wrap ga-6 mt-4">
+            <p data-testid="proxy-upload">
+              {{ tr('proxyToRemote') }}: {{ formatBytes(hasProxySamples ? summary?.proxyUploadBytes : null) }}
+            </p>
+            <p data-testid="proxy-download">
+              {{ tr('proxyFromRemote') }}: {{ formatBytes(hasProxySamples ? summary?.proxyDownloadBytes : null) }}
+            </p>
+            <p>{{ tr('proxyToClient') }}: {{ formatBytes(hasProxySamples ? summary?.proxyDownloadBytes : null) }}</p>
+          </div>
+          <p
+            v-if="!hasProxySamples"
+            class="mt-3"
+          >
+            {{ tr('noProxyRecords') }}
+          </p>
+        </source-card>
+        <v-card
+          variant="outlined"
+          class="pa-4 mb-4"
+          data-testid="chatgpt-analysis"
+        >
+          <h2 class="text-title-large mb-2">
+            {{ tr('chatgptTitle') }}
+          </h2>
+          <p class="text-body-small">
+            {{ tr('chatgptRuleHint') }}
+          </p>
+          <div class="d-flex flex-wrap ga-8 mt-4">
+            <div>
+              {{ tr('candidateEgress') }}<strong
+                class="d-block text-headline-small"
+                data-testid="candidate-egress"
+              >{{ formatBytes(candidateEgress) }}</strong>
+            </div>
+            <div>{{ tr('candidateRemoteUpload') }}<strong class="d-block">{{ formatBytes(candidateUpload) }}</strong></div>
+            <div>{{ tr('candidateRemoteDownload') }}<strong class="d-block">{{ formatBytes(candidateDownload) }}</strong></div>
+          </div>
+          <p class="text-body-small mt-3">
+            {{ tr('candidateBoundary') }}
           </p>
           <p
-            v-if="!hasNetworkSamples"
+            v-if="analysis?.partial && hasProxySamples"
+            class="text-body-small mt-2"
+            data-testid="proxy-partial"
+          >
+            {{ tr('proxyPartial') }}
+          </p>
+          <p
+            v-if="(analysis?.unknownDomainBytes ?? 0) > 0"
             class="text-body-small mt-2"
           >
-            {{ tr('noConnectionRecords') }}
+            {{ tr('unknownDomainTraffic') }}: {{ formatBytes(analysis?.unknownDomainBytes) }}
+          </p>
+          <v-divider class="my-4" />
+          <div class="d-flex flex-wrap ga-8">
+            <div>{{ tr('actualCarrierUsage') }}<strong class="d-block">{{ carrierBill?.rowCount ? `${carrierBill.usageGiB ?? '—'} GiB` : '—' }}</strong></div>
+            <div>{{ tr('actualCarrierCost') }}<strong class="d-block">{{ carrierBill?.rowCount ? money(carrierBill.netCost, carrierBill.currency) : '—' }}</strong></div>
+          </div>
+          <v-alert
+            type="info"
+            variant="tonal"
+            class="mt-4"
+          >
+            {{ tr(`analysisStatuses.${analysisStatus}`) }}
+          </v-alert>
+          <p class="text-body-small mt-3">
+            {{ tr('analysisDays') }}: {{ (comparison?.scopes.length ?? 0) > 1 ? tr('analysisPerScope') : comparison?.pairCount ?? '—' }} · {{ tr('analysisCorrelation') }}: {{ correlationText }}
           </p>
           <p
-            class="mt-2 text-body-medium"
-            data-testid="egress-difference"
+            class="text-body-small mt-2"
+            data-testid="analysis-window"
           >
-            {{ tr('egressDifference') }}: {{ formatBytes(hasNetworkSamples && summary?.lastSampleAt ? summary.egressDifferenceBytes : null) }}
-          </p>
-          <p class="text-body-small">
-            {{ tr('differenceHint') }}
+            {{ tr('analysisWindow') }}: {{ formatAnalysisTime(comparison?.analysisFrom) }} — {{ formatAnalysisTime(comparison?.analysisTo) }}
           </p>
           <p class="text-body-small mt-2">
-            {{ tr('measurementNote') }}
+            {{ tr('analysisHistoryHint') }}
           </p>
-        </source-card>
-        <source-card
-          endpoint="series"
-          :state="states.series"
-          class="mb-4"
-        >
-          <egress-chart
-            v-if="series?.length"
-            :points="series"
-            :timezone="selectedTimezone"
-            :locale="language"
-            :label="tr('trend')"
-          /><p v-else>
-            {{ tr('noMeasurements') }}
+          <p class="text-body-small mt-2">
+            {{ tr('analysisWindowHint') }}
           </p>
-        </source-card>
+          <p class="text-body-small mt-2">
+            {{ tr(`analysisReasons.${analysisReason}`) }}
+          </p>
+          <p class="text-body-small mt-2">
+            {{ tr(`analysisSuggestions.${analysisStatus}`) }}
+          </p>
+          <v-table
+            v-if="(comparison?.scopes.length ?? 0) > 1"
+            density="compact"
+            class="mt-3"
+          >
+            <thead><tr><th>{{ tr('project') }}</th><th>{{ tr('actualCarrierCost') }}</th><th>{{ tr('analysisDays') }}</th><th>{{ tr('analysisCorrelation') }}</th></tr></thead>
+            <tbody>
+              <tr
+                v-for="scope in comparison?.scopes"
+                :key="`${scope.projectID}/${scope.currency}`"
+              >
+                <td>{{ scope.projectID }}</td><td>{{ money(scope.carrierNetCost, scope.currency) }}</td><td>{{ scope.pairCount ?? '—' }}</td><td>{{ formatCorrelation(scope.candidateCorrelation) }}</td>
+              </tr>
+            </tbody>
+          </v-table>
+        </v-card>
         <source-card
           endpoint="destinations"
           :state="states.destinations"
           class="mb-4"
         >
+          <h2 class="text-title-large mb-3">
+            {{ tr('proxyPeers') }}
+          </h2>
           <v-alert
             v-if="summary?.destinationDetailsPartial"
             type="info"
@@ -187,62 +228,29 @@
           >
             {{ tr('detailRetention') }}
           </v-alert>
-          <v-select
-            v-model="selectedLeg"
-            :items="directionOptions"
-            :label="tr('direction')"
-            hide-details
-            class="mb-3"
-            style="max-width:280px"
-          />
           <v-table
             v-if="peers.length"
             density="compact"
             height="400"
             fixed-header
           >
-            <thead><tr><th>{{ tr('destination') }}</th><th>{{ tr('direction') }}</th><th>{{ tr('protocol') }}</th><th>{{ tr('sent') }}</th></tr></thead><tbody>
+            <thead><tr><th>{{ tr('domain') }}</th><th>{{ tr('destination') }}</th><th>{{ tr('proxyToRemote') }}</th><th>{{ tr('proxyFromRemote') }}</th><th>{{ tr('proxyEgressTotal') }}</th></tr></thead>
+            <tbody>
               <tr
                 v-for="(peer, index) in peers"
                 :key="index"
               >
-                <td>{{ peer.peer || '—' }}</td><td>{{ legLabel(peer.leg) }}</td><td>{{ peer.protocol || '—' }}</td><td>{{ formatBytes(peer.txBytes) }}</td>
+                <td>{{ peer.domain || tr('unknownDomain') }}</td><td>{{ peer.peer || '—' }}</td><td>{{ formatBytes(peer.upBytes) }}</td><td>{{ formatBytes(peer.downBytes) }}</td><td>{{ formatBytes(proxyPeerTotal(peer)) }}</td>
               </tr>
             </tbody>
           </v-table>
           <p v-else>
-            {{ tr('noTargets') }}
-          </p><p class="text-body-small mt-2">
-            {{ tr('targetNote') }}
+            {{ tr('noProxyTargets') }}
+          </p>
+          <p class="text-body-small mt-2">
+            {{ tr('proxyTargetNote') }}
           </p>
         </source-card>
-        <v-expansion-panels variant="accordion">
-          <v-expansion-panel :title="tr('advanced')">
-            <v-expansion-panel-text>
-              <p>{{ tr('rxTotal') }}: {{ formatBytes(summary?.lastSampleAt ? summary.rxBytes : null) }}</p>
-              <p data-testid="proxy-upload">
-                {{ tr('proxyUpload') }}: {{ formatBytes(hasProxySamples ? summary?.proxyUploadBytes : null) }}
-              </p>
-              <p data-testid="proxy-download">
-                {{ tr('proxyDownload') }}: {{ formatBytes(hasProxySamples ? summary?.proxyDownloadBytes : null) }}
-              </p>
-              <p
-                v-if="!hasProxySamples"
-                class="text-body-small mt-2"
-              >
-                {{ tr('noProxyRecords') }}
-              </p>
-              <p class="text-body-small mt-2">
-                {{ tr('proxyHint') }}
-              </p>
-              <p>{{ tr('firstSample') }}: {{ formatTime(summary?.firstSampleAt) }}</p>
-              <p>{{ tr('lastSample') }}: {{ formatTime(summary?.lastSampleAt) }}</p>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-          <v-expansion-panel :title="tr('accountingTitle')">
-            <v-expansion-panel-text>{{ tr('accountingDetail') }}</v-expansion-panel-text>
-          </v-expansion-panel>
-        </v-expansion-panels>
       </v-window-item>
       <v-window-item value="costs">
         <v-alert
@@ -420,6 +428,52 @@
         </v-card>
       </v-window-item>
       <v-window-item value="audit">
+        <v-expansion-panels
+          class="mb-4"
+          variant="accordion"
+        >
+          <v-expansion-panel :title="tr('networkDiagnostics')">
+            <v-expansion-panel-text>
+              <p data-testid="nic-egress">
+                {{ tr('txTotal') }}: {{ formatBytes(summary?.lastSampleAt ? summary.txBytes : null) }}
+              </p>
+              <p>{{ tr('rxTotal') }}: {{ formatBytes(summary?.lastSampleAt ? summary.rxBytes : null) }}</p>
+              <p>{{ tr('toRemote') }}: {{ formatBytes(hasNetworkSamples ? summary?.toRemoteEgressBytes : null) }}</p>
+              <p>{{ tr('toClient') }}: {{ formatBytes(hasNetworkSamples ? summary?.toClientEgressBytes : null) }}</p>
+              <p>{{ tr('unknownDirection') }}: {{ formatBytes(hasNetworkSamples ? summary?.unknownDirectionEgressBytes : null) }}</p>
+              <p>{{ tr('connectionTotal') }}: {{ formatBytes(hasNetworkSamples ? summary?.networkEgressBytes : null) }}</p>
+              <p data-testid="egress-difference">
+                {{ tr('egressDifference') }}: {{ formatBytes(hasNetworkSamples && summary?.lastSampleAt ? summary.egressDifferenceBytes : null) }}
+              </p>
+              <p class="text-body-small mt-2">
+                {{ tr('connectionHint') }}
+              </p>
+              <p class="text-body-small">
+                {{ tr('differenceHint') }}
+              </p>
+              <p>{{ tr('firstSample') }}: {{ formatTime(summary?.firstSampleAt) }}</p>
+              <p>{{ tr('lastSample') }}: {{ formatTime(summary?.lastSampleAt) }}</p>
+              <p v-if="summary?.partial">
+                {{ tr('partial') }}
+              </p>
+              <source-card
+                endpoint="series"
+                :state="states.series"
+                class="mb-4"
+              >
+                <egress-chart
+                  v-if="series?.length"
+                  :points="series"
+                  :timezone="selectedTimezone"
+                  :locale="language"
+                  :label="tr('trend')"
+                /><p v-else>
+                  {{ tr('noMeasurements') }}
+                </p>
+              </source-card>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
         <source-card
           endpoint="health"
           :state="states.health"
@@ -481,7 +535,7 @@ import SourceCard from '@/components/trafficReview/SourceCard.vue'
 import EgressChart from '@/components/trafficReview/EgressChart.vue'
 import { createTrafficReviewPoller } from '@/plugins/trafficReview'
 import { trafficRangeError } from '@/plugins/trafficReviewRange'
-import { outboundPeers, billingStatusKey, connectionErrorKey, relayRule } from '@/plugins/trafficReviewPresentation'
+import { proxyPeers, proxyPeerTotal, billingStatusKey, connectionErrorKey, relayRule } from '@/plugins/trafficReviewPresentation'
 import type { TrafficAlert, TrafficBillingRecord, TrafficDestination, TrafficHealth, TrafficSeriesPoint, TrafficSummary, TrafficReviewQuery } from '@/types/trafficReview'
 const { t, te, locale } = useI18n()
 const tr = (key: string) => t(`trafficReview.${key}`)
@@ -491,23 +545,32 @@ const selectedStartDate = ref('')
 const selectedEndDate = ref('')
 const selectedTimezone = ref<TrafficReviewQuery['timezone']>('America/Los_Angeles')
 const rangeError = computed(() => trafficRangeError(selectedStartDate.value, selectedEndDate.value, selectedTimezone.value))
-const selectedLeg = ref<NonNullable<TrafficReviewQuery['leg']>>('')
 const timezoneOptions = computed(() => ['America/Los_Angeles', 'Asia/Shanghai', 'UTC'].map((value, index) => ({ value, title: tr(['pacific', 'shanghai', 'utc'][index]!) })))
-const directionOptions = computed(() => [{ value: '', title: tr('allDirections') }, { value: 'to_remote', title: tr('toRemote') }, { value: 'to_client', title: tr('toClient') }, { value: 'unknown', title: tr('unknownDirection') }])
 const poller = createTrafficReviewPoller()
 const states = poller.states
 const summary = computed(() => states.summary.data as TrafficSummary | null)
 const hasNetworkSamples = computed(() => (summary.value?.networkSampleCount ?? 0) > 0)
-const hasProxySamples = computed(() => (summary.value?.proxySampleCount ?? 0) > 0)
+const analysis = computed(() => summary.value?.proxyAnalysis ?? null)
+const hasProxySamples = computed(() => analysis.value?.hasObservations ?? (analysis.value?.observations ?? summary.value?.proxySampleCount ?? 0) > 0)
+const comparison = computed(() => analysis.value?.billingComparison ?? null)
+const proxyTotal = computed(() => !hasProxySamples.value ? null : analysis.value?.forwardedEgressBytes ?? (summary.value?.proxyUploadBytes != null && summary.value.proxyDownloadBytes != null ? summary.value.proxyUploadBytes + summary.value.proxyDownloadBytes : null))
+const hasCandidateSamples = computed(() => analysis.value?.hasObservations ?? (analysis.value?.observations ?? 0) > 0)
+const candidateUpload = computed(() => hasCandidateSamples.value ? analysis.value?.candidateUploadBytes : null)
+const candidateDownload = computed(() => hasCandidateSamples.value ? analysis.value?.candidateDownloadBytes : null)
+const candidateEgress = computed(() => hasCandidateSamples.value ? analysis.value?.candidateForwardedEgressBytes : null)
+const analysisStatus = computed(() => ['collecting', 'insufficient_data', 'correlated', 'inconclusive'].includes(comparison.value?.status ?? '') ? comparison.value!.status : 'collecting')
+const analysisReason = computed(() => comparison.value?.reason && te(`trafficReview.analysisReasons.${comparison.value.reason}`) ? comparison.value.reason : 'no_proxy_data')
+const correlationText = computed(() => comparison.value?.scopes.length === 1 ? formatCorrelation(comparison.value.scopes[0]?.candidateCorrelation) : '—')
 const series = computed(() => states.series.data as TrafficSeriesPoint[] | null)
 const alerts = computed(() => states.alerts.data as TrafficAlert[] | null)
 const health = computed(() => states.health.data as TrafficHealth | null)
 const billing = computed(() => states.billing.data as TrafficBillingRecord[] | null)
-const peers = computed(() => outboundPeers(states.destinations.data as TrafficDestination[] | null))
+const peers = computed(() => proxyPeers(states.destinations.data as TrafficDestination[] | null))
 const overview = computed(() => summary.value?.billingOverview ?? null)
+const carrierBill = computed(() => overview.value?.carrierPeeringActual ?? null)
 const hasBills = computed(() => overview.value?.targetSKUs.some(bucket => bucket.rowCount > 0) ?? false)
 const billingPanels = ref<string[]>(['setup'])
-const syncMode = computed(() => ({ offline_snapshot: 'syncOffline', standard_export_12h: 'syncBigQuery', manual_csv_fallback: 'syncManual' })[overview.value?.syncStatus.mode ?? ''] ?? 'unknown')
+const syncMode = computed(() => ({ offline_snapshot: 'syncOffline', standard_export_12h: 'syncBigQuery', standard_export_daily: 'syncBigQuery', manual_csv_fallback: 'syncManual' })[overview.value?.syncStatus.mode ?? ''] ?? 'unknown')
 const sampleStale = computed(() => !selectedStartDate.value && !selectedEndDate.value && !!health.value?.lastSampleAt && Date.now() - health.value.lastSampleAt * 1000 > Math.max(30_000, (health.value.samplingSeconds ?? 10) * 3_000))
 const refreshing = ref(false)
 const outboundTag = ref('relay-out')
@@ -521,14 +584,15 @@ function formatBytes(value: number | null | undefined): string {
   return `${(value / 1024).toFixed(2)} KiB`
 }
 function money(value: string | null | undefined, currency?: string) { return value == null ? currency === 'MIXED' ? tr('currencyMixed') : '—' : `${currency || ''} ${value}`.trim() }
+function formatCorrelation(value?: number | null) { return value == null ? '—' : value.toFixed(2) }
+function formatAnalysisTime(value?: number | null) { return value ? new Intl.DateTimeFormat(language.value, { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Los_Angeles' }).format(new Date(value * 1000)) : '—' }
 function formatTime(value: number | null | undefined): string { return value ? new Intl.DateTimeFormat(language.value, { dateStyle: 'short', timeStyle: 'medium', timeZone: selectedTimezone.value }).format(new Date(value * 1000)) : '—' }
-function legLabel(leg: string) { return tr(leg === 'to_remote' ? 'toRemote' : leg === 'to_client' ? 'toClient' : 'unknownDirection') }
 function categoryLabel(category?: string) { return tr(`skuCategories.${category && te(`trafficReview.skuCategories.${category}`) ? category : 'other_sku'}`) }
 function alertLabel(kind: string) { return tr(`alerts.${te(`trafficReview.alerts.${kind}`) ? kind : 'other'}`) }
 async function copyRule() { if (!rule.value) return; try { await navigator.clipboard.writeText(JSON.stringify(rule.value, null, 2)); copyStatus.value = 'copied' } catch { copyStatus.value = 'copyFailed' } }
 async function refresh() { if (rangeError.value || refreshing.value || poller.isLoading()) return; refreshing.value = true; try { await poller.refresh() } finally { refreshing.value = false } }
 function clearRange() { selectedStartDate.value = ''; selectedEndDate.value = '' }
-watch([selectedStartDate, selectedEndDate, selectedTimezone, selectedLeg], ([startDate, endDate, timezone, leg]) => poller.setQuery({ ...(startDate || endDate ? { startDate: startDate || '', endDate: endDate || '' } : {}), timezone, leg }))
+watch([selectedStartDate, selectedEndDate, selectedTimezone], ([startDate, endDate, timezone]) => poller.setQuery({ ...(startDate || endDate ? { startDate: startDate || '', endDate: endDate || '' } : {}), timezone }))
 watch([outboundTag, domainInput], () => { copyStatus.value = '' })
 onMounted(() => poller.start())
 onUnmounted(() => poller.stop())

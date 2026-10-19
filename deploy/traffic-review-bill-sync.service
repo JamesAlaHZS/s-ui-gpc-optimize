@@ -1,5 +1,5 @@
 [Unit]
-Description=S-UI local traffic review 12h BigQuery Standard usage export sync
+Description=S-UI local traffic review daily BigQuery Standard usage export sync
 After=network-online.target
 Wants=network-online.target
 

@@ -132,6 +132,7 @@ export interface TrafficCarrierCorrelation {
 }
 
 export interface TrafficSummary {
+  proxyAnalysis: TrafficProxyAnalysis | null
   from: number
   to: number
   timezone: string
@@ -160,6 +161,56 @@ export interface TrafficSummary {
   disclaimer: string
   billingOverview: TrafficBillingOverview | null
   carrierCorrelation: TrafficCarrierCorrelation | null
+}
+
+export interface TrafficProxyBillingScope {
+  projectID: string
+  currency: string
+  skuIDs: string[]
+  status: string
+  reason: string
+  pairCount: number | null
+  eligibleDays: number | null
+  candidateCorrelation: number | null
+  baselineCorrelation: number | null
+  confoundingCorrelation: number | null
+  carrierUsageGiB: string | null
+  carrierNetCost: string | null
+  billingDayCount: number | null
+}
+
+export interface TrafficProxyAnalysis {
+  remoteUploadBytes: number | null
+  remoteDownloadBytes: number | null
+  forwardedEgressBytes: number | null
+  forwardedIngressBytes: number | null
+  candidateUploadBytes: number | null
+  candidateDownloadBytes: number | null
+  candidateForwardedEgressBytes: number | null
+  candidateForwardedIngressBytes: number | null
+  otherForwardedEgressBytes: number | null
+  unknownDomainBytes: number | null
+  observations: number | null
+  hasObservations: boolean | null
+  firstSampleAt: number | null
+  lastSampleAt: number | null
+  partial: boolean
+  measurementBasis: string
+  flowBillingConfirmed: boolean
+  billingComparison: {
+    analysisFrom: number | null
+    analysisTo: number | null
+    status: string
+    reason: string
+    pairCount: number | null
+    eligibleDays: number | null
+    minMatchedDays: number | null
+    excludedRecentDays: number | null
+    timezone: string
+    scope: string
+    flowBillingConfirmed: boolean
+    scopes: TrafficProxyBillingScope[]
+  }
 }
 
 export interface TrafficSeriesPoint {

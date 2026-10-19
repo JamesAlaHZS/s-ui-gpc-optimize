@@ -95,25 +95,32 @@ func (r *reviewRuntime) run(ctx context.Context) {
 	defer ticker.Stop()
 	var tracker *core.SessionTracker
 	epoch := trafficreview.Epoch()
+	coverageEpoch := trafficreview.Epoch()
 	type batch struct {
 		epoch   string
 		records []trafficreview.ProxyRecord
 	}
 	pending := []batch{}
 	flush := func() {
+		activeTracker, lostSamples := false, false
 		if r.core != nil {
-			if box := r.core.GetInstance(); box != nil && box.SessionTracker() != tracker {
-				// Save old closed sessions before switching tracker lifetimes.
-				if tracker != nil {
-					rows, lost := tracker.DrainReview()
-					pending = append(pending, batch{epoch, proxyRecords(rows)})
-					if lost > 0 {
-						_ = r.store.Alert(time.Now().Unix(), "proxy_queue_gap", "Closed proxy review queue overflowed")
+			if box := r.core.GetInstance(); box != nil {
+				activeTracker = box.SessionTracker() != nil
+				if box.SessionTracker() != tracker {
+					// Save old closed sessions before switching tracker lifetimes.
+					if tracker != nil {
+						rows, lost := tracker.DrainReview()
+						pending = append(pending, batch{epoch, proxyRecords(rows)})
+						if lost > 0 {
+							lostSamples = true
+							_ = r.store.Alert(time.Now().Unix(), "proxy_queue_gap", "Closed proxy review queue overflowed")
+						}
 					}
+					tracker = box.SessionTracker()
+					epoch = trafficreview.Epoch()
+					coverageEpoch = trafficreview.Epoch()
+					_ = r.store.Alert(time.Now().Unix(), "proxy_start_gap", "New proxy tracker epoch; domain classification covers only observed supplied/sniffed metadata")
 				}
-				tracker = box.SessionTracker()
-				epoch = trafficreview.Epoch()
-				_ = r.store.Alert(time.Now().Unix(), "proxy_start_gap", "New proxy tracker epoch; domain classification covers only observed supplied/sniffed metadata")
 			}
 		}
 		if tracker != nil {
@@ -122,6 +129,7 @@ func (r *reviewRuntime) run(ctx context.Context) {
 				pending = append(pending, batch{epoch, proxyRecords(rows)})
 			}
 			if lost > 0 {
+				lostSamples = true
 				_ = r.store.Alert(time.Now().Unix(), "proxy_queue_gap", "Closed proxy review queue overflowed; short-flow attribution incomplete")
 			}
 		}
@@ -142,6 +150,7 @@ func (r *reviewRuntime) run(ctx context.Context) {
 			n += len(b.records)
 		}
 		if n > 16384 {
+			lostSamples = true
 			_ = r.store.Alert(time.Now().Unix(), "proxy_persistence_gap", "Retry buffer exceeded 16384 snapshots; oldest uncommitted attribution discarded")
 			for len(pending) > 1 && n > 16384 {
 				n -= len(pending[0].records)
@@ -150,6 +159,14 @@ func (r *reviewRuntime) run(ctx context.Context) {
 			if len(pending) == 1 && len(pending[0].records) > 16384 {
 				pending[0].records = pending[0].records[len(pending[0].records)-16384:]
 			}
+		}
+		// Traffic rows alone cannot prove an idle period was observed. Persist a
+		// separate heartbeat only after a successful drain, including zero flows.
+		// A failed or missing tick starts a new coverage lifetime on recovery.
+		if !activeTracker || failed || lostSamples || len(pending) != 0 {
+			coverageEpoch = trafficreview.Epoch()
+		} else if err := r.store.RecordProxyCoverage(time.Now().Unix(), 10, coverageEpoch); err != nil {
+			coverageEpoch = trafficreview.Epoch()
 		}
 	}
 	for {

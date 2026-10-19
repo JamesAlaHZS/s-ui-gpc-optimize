@@ -146,6 +146,14 @@ func TestTrafficReviewRequiresRealCookieAndIsReadOnly(t *testing.T) {
 			if !ok || v["ruleVersion"] == nil || v["disclaimer"] == nil || v["flowBillingConfirmed"] != false || v["billingOverview"] == nil {
 				t.Fatalf("summary contract: %+v", obj)
 			}
+			analysis, ok := v["proxyAnalysis"].(map[string]any)
+			if !ok || analysis["measurementBasis"] != "proxy_forwarded_payload" || analysis["flowBillingConfirmed"] != false || analysis["hasObservations"] != false {
+				t.Fatalf("proxy analysis must preserve missing observations and evidence boundary: %+v", analysis)
+			}
+			comparison, ok := analysis["billingComparison"].(map[string]any)
+			if !ok || comparison["flowBillingConfirmed"] != false || comparison["minMatchedDays"] != float64(7) || comparison["analysisTo"].(float64) > v["to"].(float64) {
+				t.Fatalf("comparison window must respect historical cutoff: %+v", comparison)
+			}
 		case "billing-overview":
 			v, ok := obj.(map[string]any)
 			if !ok || v["targetSKUs"] == nil || v["standardTierReference"] == nil || v["syncStatus"] == nil {

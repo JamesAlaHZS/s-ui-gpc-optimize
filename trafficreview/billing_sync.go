@@ -31,7 +31,7 @@ const (
 	SKUInterRegionVirginia          = "C863-37DA-506E"
 	SKUStandardInternetEgressOregon = "4986-FDE4-A69A"
 
-	DefaultSyncIntervalHours       = 12
+	DefaultSyncIntervalHours       = 24
 	DefaultLookbackDays            = 7
 	DefaultMaxBytesPerQuery  int64 = 64 * 1024 * 1024        // 64 MiB per query
 	DefaultMaxMonthlyBytes   int64 = 62 * 64 * 1024 * 1024   // 3.875 GiB/month (62 * 64 MiB, ~$0.0237 at $6.25/TiB)
@@ -103,6 +103,8 @@ func ClassifyBillingItem(skuID, description string) TargetSKUSpec {
 	id := strings.TrimSpace(skuID)
 	desc := strings.TrimSpace(description)
 	lowerDesc := strings.ToLower(desc)
+	carrierDesc := strings.Join(strings.Fields(strings.NewReplacer("-", " ", "_", " ", "–", " ", "—", " ").Replace(lowerDesc)), " ")
+	abbreviatedCarrier := carrierDesc == "carrier peering" || carrierDesc == "carrier peering network" || carrierDesc == "network data transfer out via carrier peering network"
 
 	if lowerDesc != "" {
 		for _, spec := range orderedTargetSKUs {
@@ -114,12 +116,22 @@ func ClassifyBillingItem(skuID, description string) TargetSKUSpec {
 			}
 		}
 		switch {
-		case strings.Contains(lowerDesc, "carrier peering"):
-			spec := orderedTargetSKUs[4]
-			if id != "" {
-				spec.SKUID = id
+		case strings.Contains(carrierDesc, "carrier peering"):
+			// Regional carrier charges are separate SKUs. In particular,
+			// Europe/Asia descriptions must never be relabeled Americas by
+			// a stale or operator-supplied matching SKU ID.
+			for _, prefix := range []string{"network data transfer out via carrier peering network", "carrier peering network", "carrier peering"} {
+				if carrierDesc == prefix+" americas based" || carrierDesc == prefix+" americas" {
+					spec := orderedTargetSKUs[4]
+					if id != "" {
+						spec.SKUID = id
+					}
+					return spec
+				}
 			}
-			return spec
+			if !abbreviatedCarrier {
+				return otherBillingItem(id, desc)
+			}
 		case strings.Contains(lowerDesc, "inter zone") || strings.Contains(lowerDesc, "inter-zone"):
 			spec := orderedTargetSKUs[1]
 			if id != "" {
@@ -149,9 +161,16 @@ func ClassifyBillingItem(skuID, description string) TargetSKUSpec {
 
 	for _, spec := range orderedTargetSKUs {
 		if spec.SKUID == id {
+			if spec.Category == "carrier_peering_egress" && desc != "" && !abbreviatedCarrier {
+				break
+			}
 			return spec
 		}
 	}
+	return otherBillingItem(id, desc)
+}
+
+func otherBillingItem(id, desc string) TargetSKUSpec {
 	if desc == "" {
 		desc = "Non-target billing item (manual reference)"
 	}
@@ -499,7 +518,7 @@ func (s *Store) BillingSyncStatus(now time.Time) (BillingSyncStatus, error) {
 	err = s.db.QueryRow("SELECT at,mode,max_export_time,status FROM review_billing_sync_runs ORDER BY id DESC LIMIT 1").Scan(&lastAt, &lastMode, &lastExport, &lastRunStatus)
 	if err == nil && lastAt.Valid {
 		status.Enabled = lastMode.String != "mock"
-		status.Mode = "standard_export_12h"
+		status.Mode = "standard_export_daily"
 		if lastMode.String == "mock" {
 			status.Mode = "offline_snapshot"
 		}
