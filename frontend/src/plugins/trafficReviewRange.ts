@@ -1,5 +1,24 @@
 export type TrafficRangeError = 'rangeIncomplete' | 'rangeInvalid' | 'rangeReversed' | 'rangeTooLong'
 
+export interface TrafficDateRange {
+  startDate: string
+  endDate: string
+}
+
+export function defaultTrafficDateRange(now = new Date(), timezone = 'America/Los_Angeles'): TrafficDateRange {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now)
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]))
+  const year = values.year
+  const month = values.month
+  const day = values.day
+  return { startDate: `${year}-${month}-01`, endDate: `${year}-${month}-${day}` }
+}
+
 function dateValue(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
   const date = new Date(`${value}T00:00:00Z`)

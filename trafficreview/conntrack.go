@@ -56,7 +56,7 @@ type ConntrackCollector struct {
 	eventSeen  bool
 }
 
-var errUnsupportedProtocol = errors.New("unsupported or missing TCP/UDP protocol")
+var errUnsupportedProtocol = errors.New("unsupported protocol")
 
 func NewConntrackCollector(onRecord func(ConntrackRecord), onHealth func(ConntrackHealth)) *ConntrackCollector {
 	return &ConntrackCollector{onRecord: onRecord, onHealth: onHealth}
@@ -166,6 +166,13 @@ func (c *ConntrackCollector) snapshotLoop(ctx context.Context, path string, inte
 }
 
 func (c *ConntrackCollector) snapshot(ctx context.Context, path string) {
+	c.mu.Lock()
+	parseErrorsBefore := c.health.ParseErrors
+	eventGapsBefore := c.health.EventGaps
+	enobufsBefore := c.health.ENOBUFS
+	c.mu.Unlock()
+
+	allFamiliesOK := true
 	for _, family := range []string{"ipv4", "ipv6"} {
 		if ctx.Err() != nil {
 			return
@@ -174,15 +181,18 @@ func (c *ConntrackCollector) snapshot(ctx context.Context, path string) {
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			c.snapshotError(family, err)
+			allFamiliesOK = false
 			continue
 		}
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			c.snapshotError(family, err)
+			allFamiliesOK = false
 			continue
 		}
 		if err = cmd.Start(); err != nil {
 			c.snapshotError(family, err)
+			allFamiliesOK = false
 			continue
 		}
 		var scanWG sync.WaitGroup
@@ -199,17 +209,30 @@ func (c *ConntrackCollector) snapshot(ctx context.Context, path string) {
 		}
 		if readErr != nil {
 			c.snapshotError(family, readErr)
+			allFamiliesOK = false
 			continue
 		}
 		if waitErr != nil {
 			c.snapshotError(family, waitErr)
-			continue
+			allFamiliesOK = false
 		}
-		c.changeHealth(func(h *ConntrackHealth) {
-			c.snapshotOK = true
-			h.Available = true
-		})
 	}
+	if allFamiliesOK {
+		c.snapshotSucceeded(parseErrorsBefore, eventGapsBefore, enobufsBefore)
+	}
+}
+
+func (c *ConntrackCollector) snapshotSucceeded(parseErrorsBefore, eventGapsBefore, enobufsBefore uint64) {
+	c.changeHealth(func(h *ConntrackHealth) {
+		// A snapshot interrupted by a new parse error or event gap is not
+		// sufficient proof that collection has recovered.
+		c.snapshotOK = h.ParseErrors == parseErrorsBefore && h.EventGaps == eventGapsBefore && h.ENOBUFS == enobufsBefore
+		h.Available = true
+		if h.EventListeners > 0 && c.snapshotOK {
+			h.Degraded = false
+			h.LastError = ""
+		}
+	})
 }
 
 func (c *ConntrackCollector) snapshotError(family string, err error) {
@@ -235,6 +258,7 @@ func (c *ConntrackCollector) scanRecords(r io.Reader, forcedEvent string) error 
 				continue
 			}
 			c.changeHealth(func(h *ConntrackHealth) {
+				c.snapshotOK = false
 				h.ParseErrors++
 				h.Degraded = true
 				h.LastError = "conntrack parse: " + err.Error()
@@ -245,7 +269,14 @@ func (c *ConntrackCollector) scanRecords(r io.Reader, forcedEvent string) error 
 			c.onRecord(rec)
 		}
 		if forcedEvent == "" {
-			c.changeHealth(func(h *ConntrackHealth) { c.eventSeen = true; h.Available = true })
+			c.changeHealth(func(h *ConntrackHealth) {
+				c.eventSeen = true
+				h.Available = true
+				if c.snapshotOK {
+					h.Degraded = false
+					h.LastError = ""
+				}
+			})
 		}
 	}
 	return scanner.Err()
@@ -290,30 +321,37 @@ func (c *ConntrackCollector) changeHealth(change func(*ConntrackHealth)) {
 func parseConntrackLine(line, forcedEvent string, at int64) (ConntrackRecord, error) {
 	fields := strings.Fields(line)
 	rec := ConntrackRecord{At: at, Event: forcedEvent}
-	protoAt := -1
-	unsupported := false
-	for i, field := range fields {
-		if i == 0 && strings.HasPrefix(field, "[") && strings.HasSuffix(field, "]") {
-			if eventAt, ok := conntrackTimestamp(strings.Trim(field, "[]")); ok {
-				rec.At = eventAt
-			}
-		}
-		switch strings.ToLower(strings.Trim(field, "[]")) {
-		case "new", "update", "destroy":
-			if forcedEvent == "" {
-				rec.Event = strings.ToLower(strings.Trim(field, "[]"))
-			}
-		case "tcp", "udp":
-			if protoAt < 0 {
-				protoAt = i
-				rec.Protocol = strings.ToLower(field)
-			}
-		case "icmp", "icmpv6", "sctp", "dccp", "gre":
-			unsupported = true
+	if len(fields) == 0 {
+		return rec, errors.New("empty conntrack line")
+	}
+
+	protoAt := 0
+	if strings.HasPrefix(fields[protoAt], "[") && strings.HasSuffix(fields[protoAt], "]") {
+		if eventAt, ok := conntrackTimestamp(strings.Trim(fields[protoAt], "[]")); ok {
+			rec.At = eventAt
+			protoAt++
 		}
 	}
-	if protoAt < 0 {
-		if unsupported {
+	if protoAt < len(fields) {
+		event := strings.ToLower(strings.Trim(fields[protoAt], "[]"))
+		switch event {
+		case "new", "update", "destroy":
+			if forcedEvent == "" {
+				rec.Event = event
+			}
+			protoAt++
+		}
+	}
+	if protoAt >= len(fields) {
+		return rec, errors.New("missing protocol")
+	}
+
+	protocol := strings.ToLower(fields[protoAt])
+	switch protocol {
+	case "tcp", "udp":
+		rec.Protocol = protocol
+	default:
+		if isNonTCPUDPProtocol(fields, protoAt) {
 			return rec, errUnsupportedProtocol
 		}
 		return rec, errors.New("missing TCP/UDP protocol")
@@ -350,6 +388,23 @@ func parseConntrackLine(line, forcedEvent string, at int64) (ConntrackRecord, er
 		}
 	}
 	return rec, nil
+}
+
+func isNonTCPUDPProtocol(fields []string, at int) bool {
+	if at+1 >= len(fields) {
+		return false
+	}
+	name := strings.ToLower(fields[at])
+	if name == "" {
+		return false
+	}
+	for _, char := range name {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	protocolNumber, err := strconv.Atoi(fields[at+1])
+	return err == nil && protocolNumber >= 0 && protocolNumber <= 255 && protocolNumber != 6 && protocolNumber != 17
 }
 
 func conntrackTimestamp(s string) (int64, bool) {

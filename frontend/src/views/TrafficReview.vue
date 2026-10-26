@@ -534,16 +534,17 @@ import { useI18n } from 'vue-i18n'
 import SourceCard from '@/components/trafficReview/SourceCard.vue'
 import EgressChart from '@/components/trafficReview/EgressChart.vue'
 import { createTrafficReviewPoller } from '@/plugins/trafficReview'
-import { trafficRangeError } from '@/plugins/trafficReviewRange'
+import { defaultTrafficDateRange, trafficRangeError } from '@/plugins/trafficReviewRange'
 import { proxyPeers, proxyPeerTotal, billingStatusKey, connectionErrorKey, relayRule } from '@/plugins/trafficReviewPresentation'
 import type { TrafficAlert, TrafficBillingRecord, TrafficDestination, TrafficHealth, TrafficSeriesPoint, TrafficSummary, TrafficReviewQuery } from '@/types/trafficReview'
 const { t, te, locale } = useI18n()
 const tr = (key: string) => t(`trafficReview.${key}`)
 const language = computed(() => locale.value === 'zhHans' ? 'zh-CN' : locale.value === 'zhHant' ? 'zh-TW' : locale.value)
 const tab = ref('overview')
-const selectedStartDate = ref('')
-const selectedEndDate = ref('')
 const selectedTimezone = ref<TrafficReviewQuery['timezone']>('America/Los_Angeles')
+const initialDateRange = defaultTrafficDateRange(new Date(), selectedTimezone.value)
+const selectedStartDate = ref(initialDateRange.startDate)
+const selectedEndDate = ref(initialDateRange.endDate)
 const rangeError = computed(() => trafficRangeError(selectedStartDate.value, selectedEndDate.value, selectedTimezone.value))
 const timezoneOptions = computed(() => ['America/Los_Angeles', 'Asia/Shanghai', 'UTC'].map((value, index) => ({ value, title: tr(['pacific', 'shanghai', 'utc'][index]!) })))
 const poller = createTrafficReviewPoller()
@@ -571,7 +572,7 @@ const carrierBill = computed(() => overview.value?.carrierPeeringActual ?? null)
 const hasBills = computed(() => overview.value?.targetSKUs.some(bucket => bucket.rowCount > 0) ?? false)
 const billingPanels = ref<string[]>(['setup'])
 const syncMode = computed(() => ({ offline_snapshot: 'syncOffline', standard_export_12h: 'syncBigQuery', standard_export_daily: 'syncBigQuery', manual_csv_fallback: 'syncManual' })[overview.value?.syncStatus.mode ?? ''] ?? 'unknown')
-const sampleStale = computed(() => !selectedStartDate.value && !selectedEndDate.value && !!health.value?.lastSampleAt && Date.now() - health.value.lastSampleAt * 1000 > Math.max(30_000, (health.value.samplingSeconds ?? 10) * 3_000))
+const sampleStale = computed(() => !!health.value?.lastSampleAt && Date.now() - health.value.lastSampleAt * 1000 > Math.max(30_000, (health.value.samplingSeconds ?? 10) * 3_000))
 const refreshing = ref(false)
 const outboundTag = ref('relay-out')
 const domainInput = ref('')
@@ -592,7 +593,7 @@ function alertLabel(kind: string) { return tr(`alerts.${te(`trafficReview.alerts
 async function copyRule() { if (!rule.value) return; try { await navigator.clipboard.writeText(JSON.stringify(rule.value, null, 2)); copyStatus.value = 'copied' } catch { copyStatus.value = 'copyFailed' } }
 async function refresh() { if (rangeError.value || refreshing.value || poller.isLoading()) return; refreshing.value = true; try { await poller.refresh() } finally { refreshing.value = false } }
 function clearRange() { selectedStartDate.value = ''; selectedEndDate.value = '' }
-watch([selectedStartDate, selectedEndDate, selectedTimezone], ([startDate, endDate, timezone]) => poller.setQuery({ ...(startDate || endDate ? { startDate: startDate || '', endDate: endDate || '' } : {}), timezone }))
+watch([selectedStartDate, selectedEndDate, selectedTimezone], ([startDate, endDate, timezone]) => poller.setQuery({ ...(startDate || endDate ? { startDate: startDate || '', endDate: endDate || '' } : {}), timezone }), { immediate: true })
 watch([outboundTag, domainInput], () => { copyStatus.value = '' })
 onMounted(() => poller.start())
 onUnmounted(() => poller.stop())

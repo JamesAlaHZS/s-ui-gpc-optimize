@@ -12,22 +12,30 @@ import { trafficReviewZh } from '@/locales/trafficReview'
 vi.mock('@/plugins/trafficReview', () => ({ createTrafficReviewPoller: vi.fn() }))
 vi.mock('@/components/trafficReview/EgressChart.vue', () => ({ default: { template: '<div />' } }))
 
-afterEach(() => { document.body.innerHTML = '' })
+afterEach(() => { document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('Chinese outbound page', () => {
   function page(summary: Record<string, unknown> = {}) {
     const states = reactive(emptyTrafficReviewStates())
     states.summary.data = summary
-    const setQuery = vi.fn()
-    vi.mocked(createTrafficReviewPoller).mockReturnValue({ states, start: vi.fn(), stop: vi.fn(), refresh: vi.fn(), setQuery, isLoading: () => false } as unknown as ReturnType<typeof createTrafficReviewPoller>)
+    const order: string[] = []
+    const setQuery = vi.fn(() => { order.push('query') })
+    const start = vi.fn(() => { order.push('start') })
+    vi.mocked(createTrafficReviewPoller).mockReturnValue({ states, start, stop: vi.fn(), refresh: vi.fn(), setQuery, isLoading: () => false } as unknown as ReturnType<typeof createTrafficReviewPoller>)
     const wrapper = mount(TrafficReview, { attachTo: document.body, global: { plugins: [createVuetify({ components }), createI18n({ legacy: false, locale: 'zhHans', messages: { zhHans: { pages: { trafficReview: '出站流量' }, trafficReview: trafficReviewZh } } })] } })
-    return { states, wrapper, setQuery }
+    return { states, wrapper, setQuery, order }
   }
 
-  it('sends complete ranges, explains invalid input, and clears to the last 24 hours', async () => {
-    const { wrapper, setQuery } = page()
+  it('initializes a timezone-correct month-to-date range before polling and clears to the last 24 hours', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-18T18:00:00Z'))
+    const { wrapper, setQuery, order } = page()
     const dates = wrapper.findAll('input[type="date"]')
-    await dates[0]!.setValue('2026-10-01')
+    expect((dates[0]!.element as HTMLInputElement).value).toBe('2026-10-01')
+    expect((dates[1]!.element as HTMLInputElement).value).toBe('2026-10-18')
+    expect(setQuery).toHaveBeenLastCalledWith({ startDate: '2026-10-01', endDate: '2026-10-18', timezone: 'America/Los_Angeles' })
+    expect(order.slice(0, 2)).toEqual(['query', 'start'])
+    await dates[1]!.setValue('')
     expect(wrapper.get('[data-testid="range-error"]').text()).toBe('请同时填写开始和结束日期。')
     expect(setQuery).toHaveBeenLastCalledWith({ startDate: '2026-10-01', endDate: '', timezone: 'America/Los_Angeles' })
     await dates[1]!.setValue('2026-10-18')
@@ -119,6 +127,26 @@ describe('Chinese outbound page', () => {
     expect(wrapper.get('[data-testid="proxy-egress"]').text()).toBe('0.00 KiB')
     expect(wrapper.get('[data-testid="candidate-egress"]').text()).toBe('0.00 KiB')
     expect(wrapper.text()).not.toContain('暂无代理载荷记录')
+    wrapper.unmount()
+  })
+
+  it('still flags stale live sampling when the default month-to-date range is selected', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-25T12:00:00Z'))
+    const { states, wrapper } = page()
+    states.health.data = {
+      enabled: true,
+      available: true,
+      lastSampleAt: Date.parse('2026-10-25T10:00:00Z') / 1000,
+      samplingSeconds: 10,
+      conntrack: { available: true, degraded: false },
+    }
+    const dates = wrapper.findAll('input[type="date"]')
+    expect((dates[0]!.element as HTMLInputElement).value).toBe('2026-10-01')
+    expect((dates[1]!.element as HTMLInputElement).value).toBe('2026-10-25')
+    await wrapper.findAll('[role="tab"]')[3]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('数据不完整')
     wrapper.unmount()
   })
 

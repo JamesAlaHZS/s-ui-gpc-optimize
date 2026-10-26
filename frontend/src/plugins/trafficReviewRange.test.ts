@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { trafficRangeError } from './trafficReviewRange'
+import { defaultTrafficDateRange, trafficRangeError } from './trafficReviewRange'
+
+describe('default traffic date range', () => {
+  it('uses the selected timezone calendar date across UTC month boundaries', () => {
+    expect(defaultTrafficDateRange(new Date('2026-11-01T06:30:00Z'))).toEqual({ startDate: '2026-10-01', endDate: '2026-10-31' })
+    expect(defaultTrafficDateRange(new Date('2026-11-01T06:30:00Z'), 'UTC')).toEqual({ startDate: '2026-11-01', endDate: '2026-11-01' })
+  })
+
+  it('handles month rollover, leap day and daylight-saving transitions', () => {
+    expect(defaultTrafficDateRange(new Date('2026-03-01T07:30:00Z'))).toEqual({ startDate: '2026-02-01', endDate: '2026-02-28' })
+    expect(defaultTrafficDateRange(new Date('2024-02-29T20:00:00Z'))).toEqual({ startDate: '2024-02-01', endDate: '2024-02-29' })
+    expect(defaultTrafficDateRange(new Date('2026-03-08T10:30:00Z'))).toEqual({ startDate: '2026-03-01', endDate: '2026-03-08' })
+  })
+})
 
 describe('traffic date range', () => {
   it('accepts rolling mode, an inclusive single day and exactly three calendar years', () => {
