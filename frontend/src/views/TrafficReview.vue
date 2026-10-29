@@ -175,7 +175,8 @@
             {{ tr(`analysisStatuses.${analysisStatus}`) }}
           </v-alert>
           <p class="text-body-small mt-3">
-            {{ tr('analysisDays') }}: {{ (comparison?.scopes.length ?? 0) > 1 ? tr('analysisPerScope') : comparison?.pairCount ?? '—' }} · {{ tr('analysisCorrelation') }}: {{ correlationText }}
+            {{ tr('analysisDays') }}: {{ (comparison?.scopes.length ?? 0) > 1 ? tr('analysisPerScope') : comparison?.pairCount ?? '—' }} · {{ tr('analysisEligibleDays') }}: {{ comparison?.eligibleDays ?? '—' }} · {{ tr('analysisCorrelation') }}: {{ correlationText }}
+          <span v-if="comparison?.scopes.length === 1" class="d-block mt-1" data-testid="billing-evidence-days">{{ tr('analysisEvidenceDays') }}: {{ comparison.scopes[0]?.evidenceDayCount ?? '—' }} · {{ tr('analysisCarrierDays') }}: {{ comparison.scopes[0]?.billingDayCount ?? '—' }} · {{ tr('analysisZeroDays') }}: {{ comparison.scopes[0]?.zeroUsageDays ?? '—' }}</span>
           </p>
           <p
             class="text-body-small mt-2"

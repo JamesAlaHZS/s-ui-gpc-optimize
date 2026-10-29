@@ -66,6 +66,8 @@ type ProxyBillingScope struct {
 	CarrierUsageGiB        string            `json:"carrierUsageGiB"`
 	CarrierNetCost         string            `json:"carrierNetCost"`
 	BillingDayCount        int               `json:"billingDayCount"`
+	EvidenceDayCount       int               `json:"evidenceDayCount"`
+	ZeroUsageDays          int               `json:"zeroUsageDays"`
 	Days                   []ProxyBillingDay `json:"days"`
 }
 
@@ -477,22 +479,35 @@ func (s *Store) proxyBillingComparison(r Range, now time.Time) (ProxyBillingComp
 		return out, err
 	}
 	type scopeData struct {
-		value ProxyBillingScope
-		byDay map[string]ProxyBillingDay
-		skus  map[string]bool
+		value        ProxyBillingScope
+		byDay        map[string]ProxyBillingDay
+		evidenceDays map[string]bool
+		carrierDays  map[string]bool
+		skus         map[string]bool
 	}
 	scopes := map[string]*scopeData{}
 	for _, b := range bills {
-		if ClassifyBillingItem(b.SKUID, b.Description).Category != "carrier_peering_egress" {
+		category := ClassifyBillingItem(b.SKUID, b.Description).Category
+		// A row from any tracked network SKU family is evidence for that
+		// project/currency/day. If Carrier Peering has no row on an evidenced
+		// day, its usage is zero rather than an unknown missing day.
+		switch category {
+		case "standard_internet_egress", "inter_zone_egress", "inter_region_las_vegas", "inter_region_virginia", "carrier_peering_egress":
+		default:
 			continue
 		}
 		key := b.ProjectID + "\x00" + b.Currency
 		data := scopes[key]
 		if data == nil {
-			data = &scopeData{value: ProxyBillingScope{ProjectID: b.ProjectID, Currency: b.Currency, SKUIDs: []string{}, CarrierUsageGiB: "0", CarrierNetCost: "0", Days: []ProxyBillingDay{}, EligibleDays: out.EligibleDays}, byDay: map[string]ProxyBillingDay{}, skus: map[string]bool{}}
+			data = &scopeData{value: ProxyBillingScope{ProjectID: b.ProjectID, Currency: b.Currency, SKUIDs: []string{}, CarrierUsageGiB: "0", CarrierNetCost: "0", Days: []ProxyBillingDay{}, EligibleDays: out.EligibleDays}, byDay: map[string]ProxyBillingDay{}, evidenceDays: map[string]bool{}, carrierDays: map[string]bool{}, skus: map[string]bool{}}
 			scopes[key] = data
 		}
+		data.evidenceDays[b.Date] = true
+		if category != "carrier_peering_egress" {
+			continue
+		}
 		data.skus[b.SKUID] = true
+		data.carrierDays[b.Date] = true
 		data.value.CarrierUsageGiB = addDecimalStrings(data.value.CarrierUsageGiB, b.UsageGiB)
 		data.value.CarrierNetCost = addDecimalStrings(data.value.CarrierNetCost, b.NetCost)
 		v := data.byDay[b.Date]
@@ -509,7 +524,13 @@ func (s *Store) proxyBillingComparison(r Range, now time.Time) (ProxyBillingComp
 	pairedDates := map[string]bool{}
 	for _, key := range keys {
 		data := scopes[key]
-		data.value.BillingDayCount = len(data.byDay)
+		data.value.BillingDayCount = len(data.carrierDays)
+		data.value.EvidenceDayCount = len(data.evidenceDays)
+		for day := range data.evidenceDays {
+			if !data.carrierDays[day] {
+				data.byDay[day] = ProxyBillingDay{Date: day, CarrierUsageGiB: "0", CarrierNetCost: "0"}
+			}
+		}
 		for sku := range data.skus {
 			data.value.SKUIDs = append(data.value.SKUIDs, sku)
 		}
@@ -522,6 +543,9 @@ func (s *Store) proxyBillingComparison(r Range, now time.Time) (ProxyBillingComp
 		for _, day := range dates {
 			if !eligible[day] || parseRatOrZero(data.byDay[day].CarrierUsageGiB).Sign() < 0 {
 				continue
+			}
+			if !data.carrierDays[day] {
+				data.value.ZeroUsageDays++
 			}
 			b := data.byDay[day]
 			local := dayTotals[day]

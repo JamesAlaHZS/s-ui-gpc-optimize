@@ -177,6 +177,8 @@ export interface TrafficProxyBillingScope {
   carrierUsageGiB: string | null
   carrierNetCost: string | null
   billingDayCount: number | null
+  evidenceDayCount: number | null
+  zeroUsageDays: number | null
 }
 
 export interface TrafficProxyAnalysis {
