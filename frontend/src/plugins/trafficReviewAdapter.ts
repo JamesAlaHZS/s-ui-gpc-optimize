@@ -40,6 +40,7 @@ function adaptProxyAnalysis(value: unknown): TrafficProxyAnalysis | null {
         status: text(scope.status), reason: text(scope.reason), pairCount: number(scope.pairCount), eligibleDays: number(scope.eligibleDays),
         candidateCorrelation: number(scope.candidateCorrelation), baselineCorrelation: number(scope.baselineCorrelation), confoundingCorrelation: number(scope.confoundingCorrelation),
         carrierUsageGiB: decimal(scope.carrierUsageGiB), carrierNetCost: decimal(scope.carrierNetCost), billingDayCount: number(scope.billingDayCount),
+        evidenceDayCount: number(scope.evidenceDayCount), zeroUsageDays: number(scope.zeroUsageDays),
       })),
     },
   }
