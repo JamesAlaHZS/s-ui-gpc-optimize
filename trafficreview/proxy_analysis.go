@@ -479,7 +479,7 @@ func (s *Store) proxyBillingComparison(r Range, now time.Time) (ProxyBillingComp
 		return out, err
 	}
 	type scopeData struct {
-		value ProxyBillingScope
+		value        ProxyBillingScope
 		byDay        map[string]ProxyBillingDay
 		evidenceDays map[string]bool
 		carrierDays  map[string]bool
@@ -515,7 +515,7 @@ func (s *Store) proxyBillingComparison(r Range, now time.Time) (ProxyBillingComp
 		v.CarrierUsageGiB = addDecimalStrings(v.CarrierUsageGiB, b.UsageGiB)
 		v.CarrierNetCost = addDecimalStrings(v.CarrierNetCost, b.NetCost)
 		data.byDay[b.Date] = v
-}
+	}
 	keys := make([]string, 0, len(scopes))
 	for k := range scopes {
 		keys = append(keys, k)
