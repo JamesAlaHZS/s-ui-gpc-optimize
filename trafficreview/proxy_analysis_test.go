@@ -197,6 +197,30 @@ func TestProxyComparisonRejectsConfoundingConstantsUnknownsAndInsufficientDays(t
 	}
 }
 
+func TestProxyComparisonUsesOtherTrackedSKUAsZeroCarrierEvidence(t *testing.T) {
+	s := testStore(t)
+	start, now, r := proxyTestWindow(t)
+	for i := 0; i < 10; i++ {
+		day := start.AddDate(0, 0, i)
+		proxyTestDay(t, s, day, int64(i+1)*100, 10, 0, true)
+		if i == 3 || i == 6 {
+			_, err := s.db.Exec(`INSERT INTO review_bills(date,project_id,sku_id,description,usage_gib,cost,currency,source_sha,scope,net_cost) VALUES(?,?,?,?,?,?,?,?,?,?)`, day.Format("2006-01-02"), "p", SKUStandardInternetEgressOregon, DescStandardInternetEgressOregon, "1", "0", "USD", "test", "project_day_sku", "0")
+			if err != nil { t.Fatal(err) }
+			continue
+		}
+		proxyTestBill(t, s, day, "p", "USD", fmt.Sprint(i+1), "0.01")
+	}
+	v, err := s.ProxyAnalysis(r, now)
+	if err != nil { t.Fatal(err) }
+	c := v.BillingComparison
+	if c.PairCount != 10 || len(c.Scopes) != 1 { t.Fatalf("tracked-SKU evidence days were not paired: %+v", c) }
+	scope := c.Scopes[0]
+	if scope.EvidenceDayCount != 10 || scope.BillingDayCount != 8 || scope.ZeroUsageDays != 2 { t.Fatalf("billing evidence counters incorrect: %+v", scope) }
+	zeroDays := 0
+	for _, day := range scope.Days { if day.CarrierUsageGiB == "0" { zeroDays++ } }
+	if zeroDays != 2 { t.Fatalf("expected two evidenced zero-Carrier days, got %d: %+v", zeroDays, scope.Days) }
+}
+
 func TestProxyComparisonMissingBillNotZeroAndNegativeUsageExcluded(t *testing.T) {
 	s := testStore(t)
 	start, now, r := proxyTestWindow(t)
