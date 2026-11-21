@@ -1,11 +1,13 @@
 <template>
   <v-text-field
     :id="elId"
-    v-model="dateFormatted"
+    :model-value="dateFormatted"
     :label="label || $t('date.expiry')"
     prepend-inner-icon="mdi-calendar"
     readonly
+    :clearable="clearable && expDate > 0"
     hide-details
+    @click:clear="$emit('submit', 0)"
   />
   <DatePicker
     v-model="Input"
@@ -66,7 +68,9 @@ export default {
     // A unix timestamp in seconds; 0 means no expiry.
     expiry: { type: Number, required: true },
     label: { type: String, required: false, default: undefined },
-    inputId: { type: String, required: false, default: undefined }
+    inputId: { type: String, required: false, default: undefined },
+    emptyLabel: { type: String, default: undefined },
+    clearable: { type: Boolean, default: false },
   },
   emits: ['submit'],
   data() {
@@ -83,7 +87,7 @@ export default {
       return this.inputId || 'expiry'
     },
     dateFormatted() {
-      if (this.expDate == 0) return i18n.global.t('unlimited')
+      if (this.expDate == 0) return this.emptyLabel ?? i18n.global.t('unlimited')
       const date = new Date(this.expDate*1000)
       return date.toLocaleString(locale)
     },

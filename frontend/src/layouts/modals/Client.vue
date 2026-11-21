@@ -215,6 +215,25 @@
                   {{ $t(monthlyReset ? 'client.resetMonthlyHint' : 'client.resetIntervalHint') }}
                 </v-col>
               </v-row>
+              <v-row>
+                <v-col
+                  cols="12"
+                  sm="8"
+                  md="6"
+                >
+                  <DatePick
+                    :expiry="client.manualResetAt ?? 0"
+                    :label="$t('client.manualResetAt')"
+                    :empty-label="$t('client.manualResetEmpty')"
+                    input-id="client-manual-reset"
+                    clearable
+                    @submit="setManualReset"
+                  />
+                  <p class="mt-1 text-body-small text-medium-emphasis">
+                    {{ $t('client.manualResetHint', { timezone: browserTimezone }) }}
+                  </p>
+                </v-col>
+              </v-row>
               <v-row v-if="id > 0">
                 <v-col
                   cols="12"
@@ -267,7 +286,7 @@
                   /><span class="text-success">{{ down }}</span>
                 </v-col>
               </v-row>
-              <v-row v-if="id >0 && client.autoReset">
+              <v-row v-if="id > 0 && (client.autoReset || client.manualResetAt)">
                 <v-col
                   cols="12"
                   sm="6"
@@ -508,6 +527,9 @@ export default {
     return {
       client: createClient(),
       scheduleChanged: false,
+      manualResetChanged: false,
+      intervalChanged: false,
+      browserTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       monthlyResetEnabled: false,
       title: "add",
       loading: false,
@@ -564,6 +586,7 @@ export default {
         if (this.client.nextReset && this.client.nextReset > 0) {
           this.client.nextReset += (v-(this.client.resetDays?? 0))*24*60*60
         }
+        this.intervalChanged = true
         this.client.resetDays = v
       }
     },
@@ -573,7 +596,8 @@ export default {
     totalUp() :string { return HumanReadable.sizeFormat((this.client.totalUp ?? 0) + this.client.up) },
     totalDown() :string { return HumanReadable.sizeFormat((this.client.totalDown ?? 0) + this.client.down) },
     nextResetFormatted() :string {
-      if (this.scheduleChanged) return this.$t('client.resetAfterSave')
+      if (this.client.manualResetAt) return new Date(this.client.manualResetAt * 1000).toLocaleString(locale)
+      if (this.scheduleChanged || this.manualResetChanged) return this.$t('client.resetAfterSave')
       const ts = this.client.nextReset?? 0
       if (ts == 0) return '-'
       const date = new Date(ts*1000)
@@ -607,6 +631,8 @@ export default {
       }
       this.monthlyResetEnabled = !!this.client.resetMonthlyTime
       this.scheduleChanged = false
+      this.manualResetChanged = false
+      this.intervalChanged = false
       this.links = this.client.links?.filter(l => l.type == 'local')?? []
       this.extLinks = this.client.links?.filter(l => l.type == 'external')?? []
       this.subLinks = this.client.links?.filter(l => l.type == 'sub')?? []
@@ -635,9 +661,19 @@ export default {
       this.client.links = [
                         ...this.extLinks.filter(l => l.uri != ''),
                         ...this.subLinks.filter(l => l.uri != '')]
-      const success = await Data().save("clients", this.$props.id == 0 ? "new" : "edit", this.client)
+      const payload = {
+        ...this.client,
+        manualResetAt: this.manualResetChanged ? this.client.manualResetAt : undefined,
+        nextReset: this.intervalChanged ? this.client.nextReset : undefined,
+      }
+      const success = await Data().save("clients", this.$props.id == 0 ? "new" : "edit", payload)
       if (success) this.closeModal()
       this.loading = false
+    },
+    setManualReset(timestamp: number) {
+      if (!Number.isFinite(timestamp) || timestamp === (this.client.manualResetAt ?? 0)) return
+      this.client.manualResetAt = timestamp
+      this.manualResetChanged = true
     },
     setDate(newDate:number){
       this.client.expiry = newDate

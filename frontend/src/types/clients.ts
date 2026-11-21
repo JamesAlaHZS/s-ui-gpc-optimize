@@ -26,6 +26,7 @@ export interface Client {
   resetTimezone?: string
   resetDays?: number
   nextReset?: number
+  manualResetAt?: number
   totalUp?: number
   totalDown?: number
   createdAt?: number

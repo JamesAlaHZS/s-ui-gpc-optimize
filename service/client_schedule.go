@@ -42,19 +42,36 @@ func advanceClientReset(client *model.Client, now time.Time) error {
 	return nil
 }
 
-func (s *ClientService) prepareClientReset(tx *gorm.DB, client *model.Client, editing bool, now time.Time) error {
+type clientResetUpdate struct {
+	ManualResetAt *int64
+	NextReset     *int64
+}
+
+func (s *ClientService) prepareClientReset(tx *gorm.DB, client *model.Client, editing bool, now time.Time, update clientResetUpdate) error {
 	client.ResetMonthlyTime = strings.TrimSpace(client.ResetMonthlyTime)
 	client.ResetTimezone = strings.TrimSpace(client.ResetTimezone)
-	if !client.AutoReset {
-		client.NextReset = 0
-		return nil
-	}
 	var previous model.Client
 	if editing {
-		if err := tx.Select("auto_reset", "delay_start", "reset_monthly_time", "reset_timezone", "next_reset").
+		if err := tx.Select("auto_reset", "delay_start", "reset_monthly_time", "reset_timezone", "next_reset", "manual_reset_at").
 			First(&previous, client.Id).Error; err != nil {
 			return err
 		}
+	}
+	if update.ManualResetAt != nil {
+		if *update.ManualResetAt != 0 && *update.ManualResetAt <= now.Unix() {
+			return fmt.Errorf("choose a future date and time for the next reset")
+		}
+		client.ManualResetAt = *update.ManualResetAt
+	} else {
+		client.ManualResetAt = previous.ManualResetAt
+	}
+	client.NextReset = previous.NextReset
+	if update.NextReset != nil {
+		client.NextReset = *update.NextReset
+	}
+	if !client.AutoReset {
+		client.NextReset = 0
+		return nil
 	}
 	if client.ResetMonthlyTime == "" {
 		if previous.ResetMonthlyTime != "" && !client.DelayStart {

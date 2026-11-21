@@ -50,6 +50,7 @@ type Client struct {
 	DelayStart       bool   `json:"delayStart" form:"delayStart" gorm:"default:false;not null"`
 	AutoReset        bool   `json:"autoReset" form:"autoReset" gorm:"default:false;not null"`
 	ResetDays        int    `json:"resetDays" form:"resetDays" gorm:"default:0;not null"`
+	ManualResetAt    int64  `json:"manualResetAt" gorm:"default:0;not null"`
 	NextReset        int64  `json:"nextReset" form:"nextReset" gorm:"default:0;not null"`
 	ResetMonthlyTime string `json:"resetMonthlyTime" gorm:"default:''"`
 	ResetTimezone    string `json:"resetTimezone" gorm:"default:''"`

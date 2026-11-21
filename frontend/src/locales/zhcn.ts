@@ -252,6 +252,9 @@ export default {
     resetMonthlyHint: "按所选时区，在每月 1 日的指定时间重置。",
     resetIntervalHint: "每个间隔日按 24 小时计算。",
     resetAfterSave: "保存后重新计算",
+    manualResetAt: "手动指定下次重置",
+    manualResetEmpty: "选择日期和时间",
+    manualResetHint: "按设备时区（{timezone}）执行一次，之后恢复已选的自动周期。也可关闭自动重置，只安排单次重置。",
     nextReset: "下次重置",
   },
   bulk: {

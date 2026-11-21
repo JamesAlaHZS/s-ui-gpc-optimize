@@ -252,6 +252,9 @@ export default {
     resetMonthlyHint: "Runs on day 1 in the selected time zone.",
     resetIntervalHint: "The interval is measured in 24-hour days.",
     resetAfterSave: "Recalculated after saving",
+    manualResetAt: "Set next reset date",
+    manualResetEmpty: "Choose a date and time",
+    manualResetHint: "Runs once at the selected time ({timezone}), then resumes the selected automatic schedule. Works with automatic resets off.",
     nextReset: "Next Reset",
   },
   bulk: {

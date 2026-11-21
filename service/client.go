@@ -75,11 +75,15 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 
 	switch act {
 	case "new", "edit":
-		var client model.Client
-		err = json.Unmarshal(data, &client)
-		if err != nil {
+		var input struct {
+			model.Client
+			ManualResetAt *int64 `json:"manualResetAt"`
+			NextReset     *int64 `json:"nextReset"`
+		}
+		if err = json.Unmarshal(data, &input); err != nil {
 			return nil, err
 		}
+		client := input.Client
 		if err = s.validateClientName(tx, &client); err != nil {
 			return nil, err
 		}
@@ -105,7 +109,7 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 				return nil, err
 			}
 		}
-		if err = s.prepareClientReset(tx, &client, act == "edit", time.Now()); err != nil {
+		if err = s.prepareClientReset(tx, &client, act == "edit", time.Now(), clientResetUpdate{ManualResetAt: input.ManualResetAt, NextReset: input.NextReset}); err != nil {
 			return nil, err
 		}
 		err = tx.Save(&client).Error
@@ -134,7 +138,7 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 				return nil, err
 			}
 			client.CreatedAt = now
-			if err = s.prepareClientReset(tx, client, false, time.Unix(now, 0)); err != nil {
+			if err = s.prepareClientReset(tx, client, false, time.Unix(now, 0), clientResetUpdate{ManualResetAt: &client.ManualResetAt, NextReset: &client.NextReset}); err != nil {
 				return nil, err
 			}
 			var ids []uint
@@ -590,22 +594,35 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 		})
 	}
 	allClients = append(allClients, resetClients...)
+	// Persist first-use dates before looking for due one-time resets. Both
+	// operations can apply to a delayed-start client on the same scheduler tick.
+	if len(allClients) > 0 {
+		if err = tx.Save(allClients).Error; err != nil {
+			return nil, err
+		}
+	}
 
 	// reset_days > 0 is a backstop: at zero, NextReset becomes dt + 0 == dt, so
 	// the row matches every minute and the volume quota is never reached.
 	err = tx.Model(model.Client{}).
-		Where("delay_start = false AND auto_reset = true AND (reset_days > 0 OR reset_monthly_time <> '') AND next_reset <= ?", dt).Find(&resetClients).Error
+		Where(`(manual_reset_at > 0 AND manual_reset_at <= ?)
+			OR (manual_reset_at = 0 AND delay_start = false AND auto_reset = true
+				AND (reset_days > 0 OR reset_monthly_time <> '') AND next_reset <= ?)`, dt, dt).
+		Find(&resetClients).Error
 	if err != nil {
 		return nil, err
 	}
 	for _, client := range resetClients {
-		unarmedMonthly := client.ResetMonthlyTime != "" && client.NextReset == 0
-		if err = advanceClientReset(client, time.Unix(dt, 0)); err != nil {
-			return nil, err
+		if client.AutoReset && !client.DelayStart && (client.ResetDays > 0 || client.ResetMonthlyTime != "") {
+			unarmedMonthly := client.ManualResetAt == 0 && client.ResetMonthlyTime != "" && client.NextReset == 0
+			if err = advanceClientReset(client, time.Unix(dt, 0)); err != nil {
+				return nil, err
+			}
+			if unarmedMonthly {
+				continue
+			}
 		}
-		if unarmedMonthly {
-			continue
-		}
+		client.ManualResetAt = 0
 		client.TotalUp += client.Up
 		client.TotalDown += client.Down
 		client.Up = 0
@@ -624,11 +641,8 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 			inboundIds = common.UnionUintArray(inboundIds, clientInboundIds)
 		}
 	}
-	allClients = append(allClients, resetClients...)
-
-	// Save clients
-	if len(allClients) > 0 {
-		err = tx.Save(allClients).Error
+	if len(resetClients) > 0 {
+		err = tx.Save(resetClients).Error
 		if err != nil {
 			return nil, err
 		}
@@ -734,6 +748,7 @@ func (s *ClientService) findInboundsChanges(tx *gorm.DB, client *model.Client, f
 		client.AutoReset = oldClient.AutoReset
 		client.ResetDays = oldClient.ResetDays
 		client.NextReset = oldClient.NextReset
+		client.ManualResetAt = oldClient.ManualResetAt
 		client.ResetMonthlyTime = oldClient.ResetMonthlyTime
 		client.ResetTimezone = oldClient.ResetTimezone
 		client.Links = oldClient.Links
