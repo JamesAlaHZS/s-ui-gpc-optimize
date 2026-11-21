@@ -176,7 +176,11 @@
           </v-alert>
           <p class="text-body-small mt-3">
             {{ tr('analysisDays') }}: {{ (comparison?.scopes.length ?? 0) > 1 ? tr('analysisPerScope') : comparison?.pairCount ?? '—' }} · {{ tr('analysisEligibleDays') }}: {{ comparison?.eligibleDays ?? '—' }} · {{ tr('analysisCorrelation') }}: {{ correlationText }}
-          <span v-if="comparison?.scopes.length === 1" class="d-block mt-1" data-testid="billing-evidence-days">{{ tr('analysisEvidenceDays') }}: {{ comparison.scopes[0]?.evidenceDayCount ?? '—' }} · {{ tr('analysisCarrierDays') }}: {{ comparison.scopes[0]?.billingDayCount ?? '—' }} · {{ tr('analysisZeroDays') }}: {{ comparison.scopes[0]?.zeroUsageDays ?? '—' }}</span>
+            <span
+              v-if="comparison?.scopes.length === 1"
+              class="d-block mt-1"
+              data-testid="billing-evidence-days"
+            >{{ tr('analysisEvidenceDays') }}: {{ comparison.scopes[0]?.evidenceDayCount ?? '—' }} · {{ tr('analysisCarrierDays') }}: {{ comparison.scopes[0]?.billingDayCount ?? '—' }} · {{ tr('analysisZeroDays') }}: {{ comparison.scopes[0]?.zeroUsageDays ?? '—' }}</span>
           </p>
           <p
             class="text-body-small mt-2"
@@ -212,6 +216,42 @@
             </tbody>
           </v-table>
         </v-card>
+        <source-card
+          endpoint="outbound-peers"
+          :state="states['outbound-peers']"
+          class="mb-4"
+        >
+          <h2 class="text-title-large mb-3">
+            {{ tr('outboundIPs') }}
+          </h2>
+          <v-table
+            v-if="wirePeers.length"
+            density="compact"
+            height="360"
+            fixed-header
+          >
+            <thead><tr><th>{{ tr('destination') }}</th><th>{{ tr('direction') }}</th><th>{{ tr('interfaceOutbound') }}</th><th>{{ tr('feeHypothesis') }}</th></tr></thead>
+            <tbody>
+              <tr
+                v-for="(peer, index) in wirePeers"
+                :key="index"
+              >
+                <td>{{ peer.peer }}</td>
+                <td>{{ tr(peer.leg === 'to_remote' ? 'proxyToRemote' : peer.leg === 'to_client' ? 'proxyToClient' : 'unknown') }}</td>
+                <td>{{ formatBytes(peer.txBytes) }}</td>
+                <td :title="peer.feeStatus === 'unknown' ? undefined : peer.feeBasis">
+                  {{ tr(peer.feeStatus) }}
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+          <p v-else>
+            {{ tr('noWireTargets') }}
+          </p>
+          <p class="text-body-small mt-2">
+            {{ tr('wireTargetNote') }}
+          </p>
+        </source-card>
         <source-card
           endpoint="destinations"
           :state="states.destinations"
@@ -273,6 +313,12 @@
           class="mb-4"
         >
           {{ tr(billingStatusKey(overview)) }} · {{ tr('billingDelay') }}
+          <div
+            v-if="overview?.syncStatus.dataset"
+            class="mt-1"
+          >
+            {{ tr('billingDataset') }} · <code>{{ overview.syncStatus.dataset }}</code>
+          </div>
         </v-alert>
         <v-card
           variant="outlined"
@@ -536,7 +582,7 @@ import SourceCard from '@/components/trafficReview/SourceCard.vue'
 import EgressChart from '@/components/trafficReview/EgressChart.vue'
 import { createTrafficReviewPoller } from '@/plugins/trafficReview'
 import { defaultTrafficDateRange, trafficRangeError } from '@/plugins/trafficReviewRange'
-import { proxyPeers, proxyPeerTotal, billingStatusKey, connectionErrorKey, relayRule } from '@/plugins/trafficReviewPresentation'
+import { outboundPeers, proxyPeers, proxyPeerTotal, billingStatusKey, connectionErrorKey, relayRule } from '@/plugins/trafficReviewPresentation'
 import type { TrafficAlert, TrafficBillingRecord, TrafficDestination, TrafficHealth, TrafficSeriesPoint, TrafficSummary, TrafficReviewQuery } from '@/types/trafficReview'
 const { t, te, locale } = useI18n()
 const tr = (key: string) => t(`trafficReview.${key}`)
@@ -567,6 +613,7 @@ const series = computed(() => states.series.data as TrafficSeriesPoint[] | null)
 const alerts = computed(() => states.alerts.data as TrafficAlert[] | null)
 const health = computed(() => states.health.data as TrafficHealth | null)
 const billing = computed(() => states.billing.data as TrafficBillingRecord[] | null)
+const wirePeers = computed(() => outboundPeers(states['outbound-peers'].data as TrafficDestination[] | null))
 const peers = computed(() => proxyPeers(states.destinations.data as TrafficDestination[] | null))
 const overview = computed(() => summary.value?.billingOverview ?? null)
 const carrierBill = computed(() => overview.value?.carrierPeeringActual ?? null)

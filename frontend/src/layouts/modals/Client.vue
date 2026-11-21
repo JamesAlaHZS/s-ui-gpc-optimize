@@ -126,7 +126,7 @@
                   />
                 </v-col>
                 <v-col
-                  v-if="client.autoReset || client.delayStart"
+                  v-if="(client.autoReset || client.delayStart) && !monthlyReset"
                   cols="12"
                   sm="6"
                   md="4"
@@ -165,6 +165,54 @@
                     :label="$t('client.autoReset')"
                     hide-details
                   />
+                </v-col>
+              </v-row>
+              <v-row v-if="client.autoReset">
+                <v-col
+                  cols="12"
+                  sm="6"
+                  md="4"
+                >
+                  <v-switch
+                    v-model="monthlyReset"
+                    color="primary"
+                    :label="$t('client.resetMonthly')"
+                    hide-details
+                  />
+                </v-col>
+                <template v-if="monthlyReset">
+                  <v-col
+                    cols="12"
+                    sm="6"
+                    md="4"
+                  >
+                    <v-text-field
+                      v-model="client.resetMonthlyTime"
+                      :label="$t('client.resetClock')"
+                      placeholder="00:00"
+                      persistent-placeholder
+                      @update:model-value="scheduleChanged = true"
+                    />
+                  </v-col>
+                  <v-col
+                    cols="12"
+                    sm="6"
+                    md="4"
+                  >
+                    <v-text-field
+                      v-model="client.resetTimezone"
+                      :label="$t('client.resetTimezone')"
+                      placeholder="Asia/Shanghai"
+                      persistent-placeholder
+                      @update:model-value="scheduleChanged = true"
+                    />
+                  </v-col>
+                </template>
+                <v-col
+                  cols="12"
+                  class="pt-0 text-body-small"
+                >
+                  {{ $t(monthlyReset ? 'client.resetMonthlyHint' : 'client.resetIntervalHint') }}
                 </v-col>
               </v-row>
               <v-row v-if="id > 0">
@@ -459,6 +507,8 @@ export default {
   data() {
     return {
       client: createClient(),
+      scheduleChanged: false,
+      monthlyResetEnabled: false,
       title: "add",
       loading: false,
       tab: "t1",
@@ -497,6 +547,16 @@ export default {
         if (!v) this.client.nextReset = 0
       }
     },
+    monthlyReset: {
+      get() { return this.monthlyResetEnabled },
+      set(enabled: boolean) {
+        this.monthlyResetEnabled = enabled
+        this.client.resetMonthlyTime = enabled ? '00:00' : ''
+        this.client.resetTimezone = enabled ? Intl.DateTimeFormat().resolvedOptions().timeZone : ''
+        if (!enabled && !this.client.resetDays) this.client.resetDays = 1
+        this.scheduleChanged = true
+      }
+    },
     resetDays: {
       get() { return this.client.resetDays?? 1 },
       set(v:number|null) {
@@ -513,10 +573,12 @@ export default {
     totalUp() :string { return HumanReadable.sizeFormat((this.client.totalUp ?? 0) + this.client.up) },
     totalDown() :string { return HumanReadable.sizeFormat((this.client.totalDown ?? 0) + this.client.down) },
     nextResetFormatted() :string {
+      if (this.scheduleChanged) return this.$t('client.resetAfterSave')
       const ts = this.client.nextReset?? 0
       if (ts == 0) return '-'
       const date = new Date(ts*1000)
-      return date.toLocaleString(locale)
+      const zone = this.monthlyReset ? this.client.resetTimezone : undefined
+      return zone ? date.toLocaleString(locale, { timeZone: zone, timeZoneName: 'short' }) : date.toLocaleString(locale)
     },
     percent() :number { return this.client.volume>0 ? Math.round((this.client.up + this.client.down) *100 / this.client.volume) : 0 },
     percentColor() :string { return (this.client.up+this.client.down) >= this.client.volume ? 'error' : this.percent>90 ? 'warning' : 'success' },
@@ -543,6 +605,8 @@ export default {
         this.title = "add"
         this.clientConfig = randomConfigs('client')
       }
+      this.monthlyResetEnabled = !!this.client.resetMonthlyTime
+      this.scheduleChanged = false
       this.links = this.client.links?.filter(l => l.type == 'local')?? []
       this.extLinks = this.client.links?.filter(l => l.type == 'external')?? []
       this.subLinks = this.client.links?.filter(l => l.type == 'sub')?? []
@@ -555,6 +619,9 @@ export default {
     },
     async saveChanges() {
       if (!this.$props.visible) return
+      if (this.client.autoReset && this.monthlyReset && !this.client.resetMonthlyTime?.trim()) {
+        this.client.resetMonthlyTime = '00:00'
+      }
       // check duplicate name
       const isDuplicateName = Data().checkClientName(this.$props.id, this.client.name)
       if (isDuplicateName) return

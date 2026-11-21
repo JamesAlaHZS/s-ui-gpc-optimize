@@ -36,7 +36,7 @@ func run() error {
 	queryProject := f.String("query-project", "", "GCP project ID for BigQuery job execution (roles/bigquery.jobUser)")
 	datasetProject := f.String("dataset-project", "", "GCP project ID hosting the billing export dataset")
 	dataset := f.String("dataset", "", "BigQuery billing export dataset ID (roles/bigquery.dataViewer)")
-	table := f.String("table", "", "Standard usage cost export table gcp_billing_export_v1_<BILLING_ACCOUNT_ID>")
+	table := f.String("table", "", "Standard usage cost export table; omit to discover it in --dataset")
 	targetProject := f.String("target-project", "", "optional target GCP project ID filter")
 	lookbackDays := f.Int("lookback-days", trafficreview.DefaultLookbackDays, "recomputable lookback window in days (1..31)")
 	maxBytes := f.Int64("max-bytes", trafficreview.DefaultMaxBytesPerQuery, "per-query maximum bytes billed/scanned (<=64 MiB)")

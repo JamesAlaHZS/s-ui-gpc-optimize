@@ -76,6 +76,16 @@ export const trafficReviewEn = {
     finish: 'After preflight and the first import succeed, the wizard saves configuration and enables one daily sync. A 404 alone does not prove that permissions are correct.',
   },
   exportHelp: 'Open the complete billing setup guide', billingDelay: 'Exports have no fixed delivery time. Initial backfill can take five days; missing data is not a zero charge.',
+  billingDataset: 'BigQuery dataset',
+  syncAccessDenied: 'BigQuery denied access. Check VM OAuth scopes and the service account’s BigQuery permissions.',
+  syncWaitingForExport: 'Waiting for Google to create the Standard usage cost export table in the selected dataset.',
+  outboundIPs: 'Outbound IPs by measured bytes',
+  interfaceOutbound: 'Outbound bytes',
+  feeHypothesis: 'Billing evidence',
+  carrier_candidate: 'Carrier Peering candidate',
+  standard_candidate: 'Standard Tier candidate',
+  noWireTargets: 'No per-IP outbound bytes were captured in this window. Check collector status and the selected dates.',
+  wireTargetNote: 'Remote targets and client-facing replies both leave the VM. Compare timestamps with the project-level billing SKU. IP rules can flag candidates for investigation.',
   syncStatus: 'Sync status', syncNever: 'Not configured', syncReady: 'Imported', syncPending: 'Waiting for exported data',
   syncError: 'Sync failed', syncDry: 'Preflight passed; sync not started', syncOffline: 'Offline sample; not a live bill',
   syncManual: 'Manual CSV import', syncBigQuery: 'BigQuery export', syncBudget: 'Query budget reached',
@@ -115,7 +125,7 @@ export const trafficReviewEn = {
     traffic_spike: 'Outbound traffic increased', bill_import: 'CSV bill imported', bill_sync: 'Bill imported',
     bill_correction: 'Exported bill corrected', billing_budget_exceeded: 'Billing query budget exceeded', other: 'Collector event',
   },
-  sources: { summary: 'Proxy payload summary', series: 'Interface outbound trend', destinations: 'Proxy destinations', alerts: 'Events', health: 'Collector status', billing: 'Bill rows' },
+  sources: { summary: 'Proxy payload summary', series: 'Interface outbound trend', destinations: 'Proxy destinations', 'outbound-peers': 'Outbound IPs', alerts: 'Events', health: 'Collector status', billing: 'Bill rows' },
 }
 
 export const trafficReviewZh = {
@@ -196,6 +206,16 @@ export const trafficReviewZh = {
     finish: '预检和首次导入均成功后，才保存配置并启用每天一次同步。404 也可能是项目、表名或位置错误，不能据此确认权限正确。',
   },
   exportHelp: '打开完整账单配置教程', billingDelay: '导出没有固定到达时间，首次回填可能需要 5 天；没有数据不等于零费用。',
+  billingDataset: 'BigQuery 数据集',
+  syncAccessDenied: 'BigQuery 拒绝访问。请核对虚拟机 OAuth 范围及服务账号的 BigQuery 权限。',
+  syncWaitingForExport: '正在等待 Google 在所选数据集生成标准使用费用导出表。',
+  outboundIPs: '出站 IP 字节排行',
+  interfaceOutbound: '出站字节',
+  feeHypothesis: '计费线索',
+  carrier_candidate: 'Carrier Peering 候选',
+  standard_candidate: 'Standard Tier 候选',
+  noWireTargets: '所选时段内未采集到逐 IP 出站字节。请检查采集状态和日期范围。',
+  wireTargetNote: '发往远端目标与回传客户端的数据都会离开 VPS。可将流量时段与项目账单 SKU 对照，IP 规则可标记待核查候选。',
   syncStatus: '同步状态', syncNever: '尚未配置', syncReady: '已导入', syncPending: '等待账单更新',
   syncError: '同步失败', syncDry: '预检通过，尚未同步', syncOffline: '离线样例，不是真实账单',
   syncManual: '手工导入', syncBigQuery: 'BigQuery 导出', syncBudget: '已达到查询预算',
@@ -234,7 +254,7 @@ export const trafficReviewZh = {
     traffic_spike: '出站流量突增', bill_import: '已导入手工账单', bill_sync: '已导入账单',
     bill_correction: '账单已更正', billing_budget_exceeded: '账单查询超过预算', other: '采集事件',
   },
-  sources: { summary: '代理载荷总览', series: '网卡出站趋势', destinations: '代理目标', alerts: '采集事件', health: '采集状态', billing: '账单明细' },
+  sources: { summary: '代理载荷总览', series: '网卡出站趋势', destinations: '代理目标', 'outbound-peers': '出站 IP', alerts: '采集事件', health: '采集状态', billing: '账单明细' },
 }
 
 // Traditional Chinese also stays in Chinese instead of falling back to English.

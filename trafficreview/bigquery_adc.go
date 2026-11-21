@@ -74,6 +74,79 @@ func (c *ADCBigQueryClient) token(ctx context.Context) (string, error) {
 	return tok.AccessToken, nil
 }
 
+var (
+	ErrBillingExportPending = errors.New("waiting for BigQuery Standard usage cost export table")
+	errBigQueryAccessDenied = errors.New("BigQuery access denied")
+)
+
+// DiscoverBillingTable reads table metadata only in the configured dataset.
+func (c *ADCBigQueryClient) DiscoverBillingTable(ctx context.Context, project, dataset string) (string, error) {
+	tok, err := c.token(ctx)
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimRight(c.BigQueryBaseURL, "/")
+	if base == "" {
+		base = defaultBigQueryBaseURL
+	}
+	endpoint := fmt.Sprintf("%s/projects/%s/datasets/%s/tables", base, url.PathEscape(project), url.PathEscape(dataset))
+	params := url.Values{"maxResults": {"1000"}}
+	var found string
+	for page := 0; page < 100; page++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := c.client().Do(req)
+		if err != nil {
+			return "", err
+		}
+		var result struct {
+			NextPageToken string `json:"nextPageToken"`
+			Tables        []struct {
+				Type           string `json:"type"`
+				TableReference struct {
+					TableID string `json:"tableId"`
+				} `json:"tableReference"`
+			} `json:"tables"`
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+				return "", fmt.Errorf("%w for %s.%s: HTTP %d (check VM OAuth scopes and BigQuery IAM)", errBigQueryAccessDenied, project, dataset, resp.StatusCode)
+			}
+			return "", fmt.Errorf("BigQuery tables.list for %s.%s returned HTTP %d (check dataset, VM OAuth scopes and BigQuery IAM)", project, dataset, resp.StatusCode)
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			return "", err
+		}
+		for _, table := range result.Tables {
+			id := table.TableReference.TableID
+			if table.Type != "TABLE" || !stdTableRe.MatchString(id) {
+				continue
+			}
+			if found != "" && id != found {
+				return "", fmt.Errorf("multiple Standard export tables in %s.%s; select the billing account table explicitly", project, dataset)
+			}
+			found = id
+		}
+		if result.NextPageToken == "" {
+			if found == "" {
+				return "", fmt.Errorf("%w in %s.%s", ErrBillingExportPending, project, dataset)
+			}
+			return found, nil
+		}
+		if result.NextPageToken == params.Get("pageToken") {
+			break
+		}
+		params.Set("pageToken", result.NextPageToken)
+	}
+	return "", errors.New("BigQuery table discovery exceeded pagination limit")
+}
+
 func (c *ADCBigQueryClient) tableStorageBytes(ctx context.Context, tok string, cfg BillingSyncConfig) (int64, error) {
 	base := strings.TrimRight(c.BigQueryBaseURL, "/")
 	if base == "" {

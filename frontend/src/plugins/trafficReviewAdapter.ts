@@ -114,6 +114,7 @@ function adaptBillingOverview(value: unknown): TrafficBillingOverview | null {
       intervalHours: number(sync.intervalHours) ?? 24,
       lastSyncAt: number(sync.lastSyncAt),
       lastExportTime: number(sync.lastExportTime),
+      dataset: text(sync.dataset),
       lastStatus: text(sync.lastStatus),
       dataPending: boolean(sync.dataPending),
       lagNotice: text(sync.lagNotice),
@@ -222,7 +223,7 @@ export function adaptTrafficReviewData(endpoint: TrafficReviewEndpoint, value: u
       rxBps: number(item.rxBps), txBps: number(item.txBps), quality: text(item.quality),
     })) ?? null
   }
-  if (endpoint === 'destinations') {
+  if (endpoint === 'destinations' || endpoint === 'outbound-peers') {
     return list(value)?.map((item): TrafficDestination => ({
       layer: item.layer === 'proxy' || item.layer === 'network' ? item.layer : 'unknown',
       peer: text(item.peer), domain: text(item.domain), user: text(item.user),

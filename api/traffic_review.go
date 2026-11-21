@@ -53,7 +53,7 @@ func (a *APIHandler) trafficReview(c *gin.Context) {
 			})
 		case "candidates":
 			obj = trafficreview.CarrierCorrelationReport{Range: r, Candidates: []trafficreview.CarrierPeeringCandidate{}, RelaySuggestion: trafficreview.RelayRouteSuggestion{Status: "pending_configuration", Configured: false, OutboundTag: trafficreview.DefaultRelayOutboundTag, Domains: []string{}, IPCIDRs: []string{}, ManualOnly: true}, Partial: true, FlowBillingConfirmed: false, BoundaryNote: trafficreview.CarrierBoundaryNote}
-		case "series", "destinations", "alerts", "billing":
+		case "series", "destinations", "outbound-peers", "alerts", "billing":
 			obj = []any{}
 		default:
 			c.Status(http.StatusNotFound)
@@ -66,6 +66,9 @@ func (a *APIHandler) trafficReview(c *gin.Context) {
 		case "series":
 			obj, err = s.Series(r)
 		case "destinations":
+			obj, err = s.Destinations(r)
+		case "outbound-peers":
+			r.Layer, r.Sort = "network", "egress"
 			obj, err = s.Destinations(r)
 		case "alerts":
 			obj, err = s.Alerts(r)

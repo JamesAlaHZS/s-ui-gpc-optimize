@@ -22,6 +22,8 @@ export interface Client {
   remark?: string
   delayStart?: boolean
   autoReset?: boolean
+  resetMonthlyTime?: string
+  resetTimezone?: string
   resetDays?: number
   nextReset?: number
   totalUp?: number

@@ -256,3 +256,11 @@ func TestEventStartFailureRecordsInitialGap(t *testing.T) {
 		t.Fatalf("initial event failure should expose a gap, not a restart: %+v", health)
 	}
 }
+
+func TestConntrackExtendedSnapshotFamilyPrefix(t *testing.T) {
+	const line = "ipv4 2 tcp 6 431978 ESTABLISHED src=10.138.0.2 dst=203.0.113.4 sport=34586 dport=443 packets=7 bytes=734 src=203.0.113.4 dst=10.138.0.2 sport=443 dport=34586 packets=9 bytes=4976 [ASSURED] mark=0 use=1 id=2661948136"
+	r, err := parseConntrackLine(line, "snapshot", 100)
+	if err != nil || r.OrigBytes != 734 || r.ReplyBytes != 4976 || r.RawID != "2661948136" {
+		t.Fatalf("cannot read extended conntrack snapshot: %+v (%v)", r, err)
+	}
+}

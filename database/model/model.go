@@ -47,12 +47,14 @@ type Client struct {
 	OnlineAt  int64 `json:"onlineAt" form:"onlineAt" gorm:"default:0;not null"`
 
 	// Delay start and periodic reset
-	DelayStart bool  `json:"delayStart" form:"delayStart" gorm:"default:false;not null"`
-	AutoReset  bool  `json:"autoReset" form:"autoReset" gorm:"default:false;not null"`
-	ResetDays  int   `json:"resetDays" form:"resetDays" gorm:"default:0;not null"`
-	NextReset  int64 `json:"nextReset" form:"nextReset" gorm:"default:0;not null"`
-	TotalUp    int64 `json:"totalUp" form:"totalUp" gorm:"default:0;not null"`
-	TotalDown  int64 `json:"totalDown" form:"totalDown" gorm:"default:0;not null"`
+	DelayStart       bool   `json:"delayStart" form:"delayStart" gorm:"default:false;not null"`
+	AutoReset        bool   `json:"autoReset" form:"autoReset" gorm:"default:false;not null"`
+	ResetDays        int    `json:"resetDays" form:"resetDays" gorm:"default:0;not null"`
+	NextReset        int64  `json:"nextReset" form:"nextReset" gorm:"default:0;not null"`
+	ResetMonthlyTime string `json:"resetMonthlyTime" gorm:"default:''"`
+	ResetTimezone    string `json:"resetTimezone" gorm:"default:''"`
+	TotalUp          int64  `json:"totalUp" form:"totalUp" gorm:"default:0;not null"`
+	TotalDown        int64  `json:"totalDown" form:"totalDown" gorm:"default:0;not null"`
 }
 
 type Stats struct {

@@ -9,7 +9,18 @@ if [[ ${1:-} == --info ]]; then
     echo '需要 BigQuery 或 cloud-platform 访问范围，以及查询项目的 BigQuery 作业用户和账单数据集的数据查看者权限。'
     exit 0
 fi
-[[ $# -eq 0 ]] || fail '仅支持无参数或 --info。'
+unattended=false
+if [[ $# -eq 2 && $1 == --dataset ]]; then
+    unattended=true
+    [[ $2 =~ ^([a-z][a-z0-9-]{4,29})\.([A-Za-z0-9_]{1,128})$ ]] || fail '请使用 --dataset 项目ID.数据集ID。'
+    dataset_project=${BASH_REMATCH[1]}
+    dataset=${BASH_REMATCH[2]}
+    query_project=${vm_project:-$dataset_project}
+    target_project=$query_project
+    table=
+else
+    [[ $# -eq 0 ]] || fail '用法：configure-billing.sh [--info | --dataset 项目ID.数据集ID]'
+fi
 [[ $EUID -eq 0 ]] || fail '请用 sudo bash 执行此脚本。'
 [[ -d /run/systemd/system ]] || fail '需要 systemd。'
 [[ -x /usr/local/bin/traffic-review ]] || fail '请先升级面板并运行 deploy/setup-traffic-review.sh。'
@@ -18,20 +29,22 @@ monitor=$(systemctl show traffic-review-bill-sync.service -p User --value)
 [[ -n $monitor && $monitor != root ]] || fail '账单服务必须使用独立的非 root 采集用户。'
 monitor_group=$(id -gn "$monitor")
 [[ -f /var/lib/s-ui-traffic-review/review.db ]] || fail '尚无采集数据库，请先启动采集器。'
-echo '请先在 GCP 开启标准使用费用导出，并给 VPS 服务账号授权。无需下载 JSON 密钥。'
-read -r -p "查询项目 ID [${vm_project}]：" query_project
-query_project=${query_project:-$vm_project}
-read -r -p "账单数据集所在项目 ID [${query_project}]：" dataset_project
-dataset_project=${dataset_project:-$query_project}
-read -r -p '账单数据集 ID（例如 billing_export）：' dataset
-read -r -p '完整表名（gcp_billing_export_v1_ 开头，不含项目和数据集）：' table
-read -r -p "需要统计的 VPS 项目 ID [${vm_project:-$query_project}]：" target_project
-target_project=${target_project:-${vm_project:-$query_project}}
+if ! $unattended; then
+    echo '请先在 GCP 开启标准使用费用导出，并给 VPS 服务账号授权。无需下载 JSON 密钥。'
+    read -r -p "查询项目 ID [${vm_project}]：" query_project
+    query_project=${query_project:-$vm_project}
+    read -r -p "账单数据集所在项目 ID [${query_project}]：" dataset_project
+    dataset_project=${dataset_project:-$query_project}
+    read -r -p '你在 BigQuery 中选择的数据集 ID：' dataset
+    read -r -p '标准导出表名（回车自动发现）：' table
+    read -r -p "需要统计的 VPS 项目 ID [${vm_project:-$query_project}]：" target_project
+    target_project=${target_project:-${vm_project:-$query_project}}
+fi
 for project in "$query_project" "$dataset_project" "$target_project"; do
     [[ $project =~ ^[a-z][a-z0-9-]{4,29}$ ]] || fail '项目 ID 格式错误；请填写 ID，不是项目名称或编号。'
 done
 [[ $dataset =~ ^[A-Za-z0-9_]{1,128}$ ]] || fail '数据集 ID 格式错误。'
-[[ $table =~ ^gcp_billing_export_v1_[A-Za-z0-9_]{6,64}$ ]] || fail '仅支持标准使用费用导出的完整表名。'
+[[ -z $table || $table =~ ^gcp_billing_export_v1_[A-Za-z0-9_]{6,64}$ ]] || fail '仅支持标准使用费用导出的完整表名。'
 args=(sync-bill --db /var/lib/s-ui-traffic-review/review.db --query-project "$query_project" --dataset-project "$dataset_project" --dataset "$dataset" --table "$table" --target-project "$target_project" --lookback-days 7 --max-bytes 67108864 --max-monthly-bytes 4160749568 --adc)
 error_file=$(mktemp)
 env_file=''
@@ -44,18 +57,24 @@ run_sync() {
         return 1
     fi
 }
-echo '正在预检权限、表和查询扫描上限……'
-run_sync --dry-run || fail '预检未通过；原配置和定时器未修改。'
-echo '正在同步最近 7 天账单……'
-run_sync || fail '首次同步未完成；原配置和定时器未修改。'
-for field in inserted corrected unchanged; do
-    pattern="\"$field\"[[:space:]]*:[[:space:]]*([0-9]+)"
-    [[ $(cat "$error_file") =~ $pattern ]] || fail '同步结果格式异常；原配置和定时器未修改。'
-    printf -v "$field" '%s' "${BASH_REMATCH[1]}"
-done
-printf '本次同步：新增 %s 条，修正 %s 条，已有且未变 %s 条。\n' "$inserted" "$corrected" "$unchanged"
-if [[ $inserted == 0 && $corrected == 0 && $unchanged == 0 ]]; then
-    echo '本次未返回匹配账单：可能尚未导出，或所选项目/日期无数据；空账单不代表零费用。'
+if ! $unattended; then
+    echo '正在预检权限、表和查询扫描上限……'
+    run_sync --dry-run || fail '预检未通过；原配置和定时器未修改。'
+    if [[ $(cat "$error_file") == *'"pending_export"'* ]]; then
+        echo '等待 Google 在所选数据集生成标准费用导出表。'
+    else
+        echo '正在同步最近 7 天账单……'
+        run_sync || fail '首次同步未完成；原配置和定时器未修改。'
+        for field in inserted corrected unchanged; do
+            pattern="\"$field\"[[:space:]]*:[[:space:]]*([0-9]+)"
+            [[ $(cat "$error_file") =~ $pattern ]] || fail '同步结果格式异常；原配置和定时器未修改。'
+            printf -v "$field" '%s' "${BASH_REMATCH[1]}"
+        done
+        printf '本次同步：新增 %s 条，修正 %s 条，已有且未变 %s 条。\n' "$inserted" "$corrected" "$unchanged"
+        if [[ $inserted == 0 && $corrected == 0 && $unchanged == 0 ]]; then
+            echo '本次未返回匹配账单：可能尚未导出，或所选项目/日期无数据；空账单不代表零费用。'
+        fi
+    fi
 fi
 install -d -m 0750 -o root -g "$monitor_group" /etc/s-ui
 env_file=$(mktemp /etc/s-ui/.billing-env.XXXXXX)
@@ -67,5 +86,8 @@ env_file=''
 systemctl daemon-reload
 systemctl enable --now traffic-review-bill-sync.timer
 echo '完成：已开启每天一次同步。Google 导出没有固定到达时间。'
+if $unattended; then
+    systemctl start traffic-review-bill-sync.service || fail '首次同步失败，已保留数据集设置和定时重试。请检查 bill-sync.err。'
+fi
 echo '面板 → 出站流量 → GCP 账单：选洛杉矶时间和已导出的日期。'
 echo '查看定时器：systemctl list-timers traffic-review-bill-sync.timer --all'

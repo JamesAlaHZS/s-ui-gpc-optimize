@@ -342,6 +342,11 @@ func parseConntrackLine(line, forcedEvent string, at int64) (ConntrackRecord, er
 			protoAt++
 		}
 	}
+	// The CLI's extended output starts snapshots with "ipv4 2" or "ipv6 10".
+	// Events can carry the same prefix after the event marker.
+	if protoAt+1 < len(fields) && (fields[protoAt] == "ipv4" || fields[protoAt] == "ipv6") {
+		protoAt += 2
+	}
 	if protoAt >= len(fields) {
 		return rec, errors.New("missing protocol")
 	}

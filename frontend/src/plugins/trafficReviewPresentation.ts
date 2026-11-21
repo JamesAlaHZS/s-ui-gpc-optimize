@@ -20,6 +20,8 @@ export function billingStatusKey(overview: TrafficBillingOverview | null): strin
   if (status.mode === 'offline_snapshot') return 'syncOffline'
   if (status.budgetPaused) return 'syncBudget'
   if (['error', 'reserved', 'rejected_budget'].includes(status.lastStatus)) return 'syncError'
+  if (status.lastStatus === 'access_denied') return 'syncAccessDenied'
+  if (status.lastStatus === 'pending_export') return 'syncWaitingForExport'
   if (status.lastStatus === 'dry_run_ok') return 'syncDry'
   if (!status.lastSyncAt) return 'syncNever'
   return status.dataPending ? 'syncPending' : 'syncReady'

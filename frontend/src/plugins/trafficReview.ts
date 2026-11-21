@@ -40,7 +40,7 @@ export function createTrafficReviewPoller(
           delete destinationQuery.leg
           const result = await request(endpoint, endpoint === 'destinations'
             ? destinationQuery
-            : windowQuery)
+            : endpoint === 'outbound-peers' ? { ...windowQuery, limit: 100 } : windowQuery)
           if (!active || requestedRevision !== revision) return
           if (!result.success || result.obj == null) {
             states[endpoint].error = result.msg || 'No data returned'

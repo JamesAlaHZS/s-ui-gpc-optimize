@@ -246,6 +246,12 @@ export default {
     delayStart: "延遲啟用",
     autoReset: "自動重設",
     resetDays: "重設週期（天）",
+    resetMonthly: "每月 1 日重設",
+    resetClock: "重設時間（HH:MM）",
+    resetTimezone: "重設時區（IANA）",
+    resetMonthlyHint: "按所選時區，在每月 1 日的指定時間重設。",
+    resetIntervalHint: "每個間隔日按 24 小時計算。",
+    resetAfterSave: "儲存後重新計算",
     nextReset: "下次重設",
   },
   bulk: {

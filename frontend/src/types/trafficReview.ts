@@ -1,5 +1,5 @@
 export const trafficReviewEndpoints = [
-  'summary', 'series', 'destinations', 'alerts', 'health', 'billing',
+  'summary', 'series', 'destinations', 'outbound-peers', 'alerts', 'health', 'billing',
 ] as const
 
 export type TrafficReviewEndpoint = typeof trafficReviewEndpoints[number]
@@ -58,6 +58,7 @@ export interface TrafficBillingTotals {
 }
 
 export interface TrafficBillingSyncStatus {
+  dataset?: string
   enabled: boolean
   mode: string
   intervalHours: number

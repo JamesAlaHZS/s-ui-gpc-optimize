@@ -105,6 +105,9 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 				return nil, err
 			}
 		}
+		if err = s.prepareClientReset(tx, &client, act == "edit", time.Now()); err != nil {
+			return nil, err
+		}
 		err = tx.Save(&client).Error
 		if err != nil {
 			return nil, err
@@ -131,6 +134,9 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 				return nil, err
 			}
 			client.CreatedAt = now
+			if err = s.prepareClientReset(tx, client, false, time.Unix(now, 0)); err != nil {
+				return nil, err
+			}
 			var ids []uint
 			if err = json.Unmarshal(client.Inbounds, &ids); err != nil {
 				return nil, err
@@ -571,7 +577,9 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 		return nil, err
 	}
 	for _, client := range resetClients {
-		client.NextReset = dt + (int64(client.ResetDays) * 86400)
+		if err = advanceClientReset(client, time.Unix(dt, 0)); err != nil {
+			return nil, err
+		}
 		client.DelayStart = false
 		changes = append(changes, model.Changes{
 			DateTime: dt,
@@ -586,12 +594,18 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 	// reset_days > 0 is a backstop: at zero, NextReset becomes dt + 0 == dt, so
 	// the row matches every minute and the volume quota is never reached.
 	err = tx.Model(model.Client{}).
-		Where("delay_start = false AND auto_reset = true AND reset_days > 0 AND next_reset < ?", dt).Find(&resetClients).Error
+		Where("delay_start = false AND auto_reset = true AND (reset_days > 0 OR reset_monthly_time <> '') AND next_reset <= ?", dt).Find(&resetClients).Error
 	if err != nil {
 		return nil, err
 	}
 	for _, client := range resetClients {
-		client.NextReset = dt + (int64(client.ResetDays) * 86400)
+		unarmedMonthly := client.ResetMonthlyTime != "" && client.NextReset == 0
+		if err = advanceClientReset(client, time.Unix(dt, 0)); err != nil {
+			return nil, err
+		}
+		if unarmedMonthly {
+			continue
+		}
 		client.TotalUp += client.Up
 		client.TotalDown += client.Down
 		client.Up = 0
@@ -716,6 +730,12 @@ func (s *ClientService) findInboundsChanges(tx *gorm.DB, client *model.Client, f
 		return nil, err
 	}
 	if fillOmitted {
+		client.DelayStart = oldClient.DelayStart
+		client.AutoReset = oldClient.AutoReset
+		client.ResetDays = oldClient.ResetDays
+		client.NextReset = oldClient.NextReset
+		client.ResetMonthlyTime = oldClient.ResetMonthlyTime
+		client.ResetTimezone = oldClient.ResetTimezone
 		client.Links = oldClient.Links
 		client.Config = oldClient.Config
 	}

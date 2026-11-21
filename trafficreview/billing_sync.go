@@ -509,6 +509,9 @@ func (s *Store) BillingSyncStatus(now time.Time) (BillingSyncStatus, error) {
 	status.MonthlyScannedBytes = scanned
 	status.EstimatedMonthlyUSD = formatRatDecimal(estimateQueryCostUSD(scanned), 6)
 
+	if err := s.db.QueryRow("SELECT value FROM review_meta WHERE key='billing_dataset'").Scan(&status.Dataset); err != nil && err != sql.ErrNoRows {
+		return BillingSyncStatus{}, err
+	}
 	var paused string
 	if s.db.QueryRow("SELECT value FROM review_meta WHERE key='billing_budget_paused'").Scan(&paused) == nil && paused == "true" {
 		status.BudgetPaused = true
@@ -608,7 +611,7 @@ func ValidateBillingSyncConfig(c BillingSyncConfig) (BillingSyncConfig, error) {
 	if strings.Contains(lowerTable, "resource_v1") || strings.Contains(lowerTable, "pricing") || strings.Contains(lowerTable, "focus") {
 		return c, errors.New("forbidden billing export table: only Standard usage cost export (gcp_billing_export_v1_<BILLING_ACCOUNT_ID>) is allowed")
 	}
-	if !stdTableRe.MatchString(c.TableID) {
+	if c.TableID != "" && !stdTableRe.MatchString(c.TableID) {
 		return c, errors.New("table must be Standard usage cost export gcp_billing_export_v1_<BILLING_ACCOUNT_ID>")
 	}
 	if c.LookbackDays < 1 || c.LookbackDays > 31 {
@@ -636,6 +639,9 @@ func BuildStandardExportQuery(c BillingSyncConfig) (string, error) {
 	cfg, err := ValidateBillingSyncConfig(c)
 	if err != nil {
 		return "", err
+	}
+	if cfg.TableID == "" {
+		return "", errors.New("Standard export table must be resolved before building the query")
 	}
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
@@ -756,16 +762,45 @@ func (s *Store) SyncStandardBilling(ctx context.Context, cfg BillingSyncConfig, 
 	if runner == nil {
 		return BillingSyncReport{}, errors.New("BigQuery runner is required")
 	}
-	query, err := BuildStandardExportQuery(validCfg)
-	if err != nil {
-		return BillingSyncReport{}, err
-	}
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
 		return BillingSyncReport{}, err
 	}
 	nowUnix := validCfg.Now.Unix()
 	month := validCfg.Now.In(loc).Format("200601")
+	if !validCfg.DryRunOnly {
+		if _, err := s.db.Exec("INSERT INTO review_meta(key,value) VALUES('billing_dataset',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+			validCfg.DatasetProjectID+"."+validCfg.DatasetID); err != nil {
+			return BillingSyncReport{}, err
+		}
+	}
+	if validCfg.TableID == "" {
+		discoverer, ok := runner.(interface {
+			DiscoverBillingTable(context.Context, string, string) (string, error)
+		})
+		if !ok {
+			return BillingSyncReport{}, errors.New("runner does not support BigQuery table discovery")
+		}
+		validCfg.TableID, err = discoverer.DiscoverBillingTable(ctx, validCfg.DatasetProjectID, validCfg.DatasetID)
+		if err != nil {
+			status := "error"
+			switch {
+			case errors.Is(err, ErrBillingExportPending):
+				status = "pending_export"
+			case errors.Is(err, errBigQueryAccessDenied):
+				status = "access_denied"
+			}
+			_ = s.recordSyncRun(nowUnix, month, "discovery", 0, 0, 0, 0, 0, 0, 0, status, err.Error())
+			if status == "pending_export" {
+				return BillingSyncReport{Status: status}, nil
+			}
+			return BillingSyncReport{}, err
+		}
+	}
+	query, err := BuildStandardExportQuery(validCfg)
+	if err != nil {
+		return BillingSyncReport{}, err
+	}
 
 	dry, err := runner.DryRun(ctx, query, validCfg)
 	if err != nil {

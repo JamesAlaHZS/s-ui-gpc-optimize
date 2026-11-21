@@ -246,6 +246,12 @@ export default {
     delayStart: "延迟启动",
     autoReset: "自动重置",
     resetDays: "重置天数",
+    resetMonthly: "每月 1 日重置",
+    resetClock: "重置时间（HH:MM）",
+    resetTimezone: "重置时区（IANA）",
+    resetMonthlyHint: "按所选时区，在每月 1 日的指定时间重置。",
+    resetIntervalHint: "每个间隔日按 24 小时计算。",
+    resetAfterSave: "保存后重新计算",
     nextReset: "下次重置",
   },
   bulk: {

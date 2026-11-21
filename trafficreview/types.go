@@ -161,6 +161,7 @@ type BillingTotals struct {
 }
 
 type BillingSyncStatus struct {
+	Dataset               string `json:"dataset,omitempty"`
 	Enabled               bool   `json:"enabled"`
 	Mode                  string `json:"mode"`
 	IntervalHours         int    `json:"intervalHours"`

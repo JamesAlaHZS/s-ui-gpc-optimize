@@ -246,6 +246,12 @@ export default {
     delayStart: "Delay Start",
     autoReset: "Auto Reset",
     resetDays: "Reset Days",
+    resetMonthly: "On the first of each month",
+    resetClock: "Reset time (HH:MM)",
+    resetTimezone: "Reset time zone (IANA)",
+    resetMonthlyHint: "Runs on day 1 in the selected time zone.",
+    resetIntervalHint: "The interval is measured in 24-hour days.",
+    resetAfterSave: "Recalculated after saving",
     nextReset: "Next Reset",
   },
   bulk: {

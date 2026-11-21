@@ -425,6 +425,9 @@ func (s *Store) Destinations(r Range) ([]Destination, error) {
 		query += " AND leg=?"
 		args = append(args, r.Leg)
 	}
+	if r.Layer == "network" && r.Sort == "egress" {
+		query += " AND peer<>'' AND tx>0"
+	}
 	query += " GROUP BY layer,peer,domain,user,inbound,outbound,protocol,business,confidence,leg,fee_status,fee_basis,rule_version ORDER BY "
 	if r.Sort == "egress" {
 		query += "SUM(CASE WHEN layer='proxy' THEN up+down ELSE tx END) DESC"
